@@ -7,18 +7,6 @@ else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 DB_PATH = os.path.join(BASE_DIR, "store.db")
-import sqlite3
-
-conn = sqlite3.connect(DB_PATH)
-c = conn.cursor()
-
-print("Database file:", DB_PATH)
-
-c.execute("PRAGMA table_info(bill_master)")
-print("bill_master columns:", c.fetchall())
-
-conn.close()
-
 import datetime
 from tkcalendar import DateEntry
 from tkinter import *
@@ -26,9 +14,6 @@ import sqlite3
 from tkinter import ttk
 from PIL import Image, ImageTk   # use Pillow for JPG/PNG
 from tkinter import ttk, messagebox
-
-
-
 print("Using database:", DB_PATH)
 
 def open_customers():
@@ -288,7 +273,7 @@ def add_customer(parent, mobile="", callback=None):
         command=save_customer
     ).pack(pady=25)
 
-def show_all_customers(parent):
+def show_all_customers(parent, load_customers=None):
 
     win = Toplevel(parent)
     win.title("Customer Details")
@@ -350,7 +335,7 @@ def show_all_customers(parent):
         fg="white",
         font=("Segoe UI", 10, "bold"),
         width=12,
-        command=lambda: search_customer()
+        command=lambda: search_customer
     )
 
     search_btn.pack(side="left", padx=5)
@@ -361,7 +346,8 @@ def show_all_customers(parent):
         bg="#10B981",
         fg="white",
         font=("Segoe UI", 10, "bold"),
-        width=12
+        width=12,
+        command=load_customers
     )
 
     refresh_btn.pack(side="left", padx=5)
@@ -425,6 +411,59 @@ def show_all_customers(parent):
 
         for row in rows:
             tree.insert("", END, values=row)
+
+    def search_customer():
+
+        key=search_var.get().strip()
+
+        customer_tree.delete(*customer_tree.get_children())
+
+        with sqlite3.connect(DB_PATH) as conn:
+
+            c=conn.cursor()
+
+            c.execute("""
+
+                SELECT
+                    cm.customer_name,
+                    cm.mobile,
+                    COUNT(b.bill_id),
+                    IFNULL(SUM(b.total),0),
+                    IFNULL(MAX(b.bill_date),'')
+
+                FROM customer_master cm
+
+                LEFT JOIN bill_master b
+                ON cm.customer_name=b.customer_name
+
+                WHERE
+
+                    cm.customer_name LIKE ?
+                    OR cm.mobile LIKE ?
+
+                GROUP BY
+                    cm.customer_id
+
+                ORDER BY
+                    cm.customer_name
+
+            """,(f"%{key}%",f"%{key}%"))
+
+            rows=c.fetchall()
+
+        for row in rows:
+
+            customer_tree.insert(
+                "",
+                END,
+                values=(
+                    row[0],
+                    row[1],
+                    row[2],
+                    f"₹{row[3]:,.2f}",
+                    row[4]
+                )
+            )
 
     def search_customer():
 
@@ -968,24 +1007,7 @@ def open_bills():
     upi_var = StringVar(value="₹0")
     card_var = StringVar(value="₹0")
     total_var = StringVar(value="₹0")
-    def create_card(parent, title, value_var, bg):
-        card = Frame(parent, bg=bg, relief="ridge", bd=2)
-        Label(
-            card,
-            text=title,
-            bg=bg,
-            fg="white",
-            font=("Segoe UI", 11, "bold")
-        ).pack(pady=(8, 2))
-        Label(
-            card,
-            textvariable=value_var,
-            bg=bg,
-            fg="white",
-            font=("Segoe UI", 18, "bold")
-        ).pack(pady=(0, 8))
 
-        return card
     create_card(card_frame, "Bills", bill_var, "#3B82F6").grid(row=0, column=0, padx=10)
     create_card(card_frame, "💵 Cash", cash_var, "#10B981").grid(row=0, column=1, padx=10)
     create_card(card_frame, "📱 UPI", upi_var, "#8B5CF6").grid(row=0, column=2, padx=10)
@@ -1128,6 +1150,920 @@ def open_bills():
            command=bills_win.destroy).grid(row=0, column=1, padx=15)
 
     load_bills()  # load today's bills on open
+def create_card(parent, title, variable, bg):
+
+    card = Frame(
+        parent,
+        bg=bg,
+        width=220,
+        height=95,
+        relief="flat",
+        bd=0
+    )
+
+    card.pack_propagate(False)
+
+    Label(
+        card,
+        textvariable=variable,
+        bg=bg,
+        fg="white",
+        font=("Segoe UI", 18, "bold")
+    ).pack(pady=(15, 0))
+
+    Label(
+        card,
+        text=title,
+        bg=bg,
+        fg="white",
+        font=("Segoe UI", 10)
+    ).pack()
+
+    return card
+
+def open_sales_report():
+    sales_win = Toplevel(window)
+    sales_win.title("Sales Report")
+    sales_win.state("zoomed")
+    sales_win.configure(bg="#FFF8E7")
+    sales_win.grab_set()
+
+    top_frame = Frame(sales_win, bg="#3B82F6")
+    top_frame.pack(fill="x")
+
+    Label(
+        top_frame,
+        text="💰 Sales Report",
+        bg="#3B82F6",
+        fg="white",
+        font=("Segoe UI", 22, "bold")
+    ).pack(pady=(15, 2))
+
+    Label(
+        top_frame,
+        text="View sales between selected dates",
+        bg="#3B82F6",
+        fg="white",
+        font=("Segoe UI", 10)
+    ).pack(pady=(0, 12))
+
+    Button(
+        top_frame,
+        text="← Back",
+        bg="#EF4444",
+        fg="white",
+        font=("Segoe UI", 10, "bold"),
+        relief="flat",
+        command=sales_win.destroy
+    ).place(relx=0.98, rely=0.08, anchor="ne")
+
+    filter_frame = Frame(sales_win, bg="#FFF8E7")
+    filter_frame.pack(fill="x", padx=15, pady=15)
+    summary_frame = Frame(sales_win, bg="#FFF8E7")
+    summary_frame.pack(fill="x", padx=15, pady=10)
+    total_sales_var = StringVar(value="₹0.00")
+    bill_count_var = StringVar(value="0")
+    cash_var = StringVar(value="₹0.00")
+    upi_var = StringVar(value="₹0.00")
+    card_var = StringVar(value="₹0.00")
+
+
+    create_card(summary_frame, "Total Sales", total_sales_var, "#3B82F6")
+    create_card(summary_frame, "Bills", bill_count_var, "#10B981")
+    create_card(summary_frame, "Cash", cash_var, "#F59E0B")
+    create_card(summary_frame, "UPI", upi_var, "#8B5CF6")
+    create_card(summary_frame, "Card", card_var, "#EF4444")
+
+    table_frame = Frame(sales_win, bg="#FFF8E7")
+    table_frame.pack(fill="both", expand=True, padx=15, pady=10)
+
+    style = ttk.Style()
+    style.theme_use("clam")
+
+    style.configure(
+        "Sales.Treeview",
+        background="#FFFDF7",
+        foreground="#374151",
+        fieldbackground="#FFFDF7",
+        rowheight=34,
+        font=("Segoe UI", 10)
+    )
+
+    style.configure(
+        "Sales.Treeview.Heading",
+        background="#3B82F6",
+        foreground="white",
+        font=("Segoe UI", 11, "bold")
+    )
+
+    style.map(
+        "Sales.Treeview",
+        background=[("selected", "#D6EFFF")],
+        foreground=[("selected", "black")]
+    )
+
+    sales_tree = ttk.Treeview(
+        table_frame,
+        columns=(
+            "Bill",
+            "Customer",
+            "Contact",
+            "Payment",
+            "Amount",
+            "Date",
+            "Time"
+        ),
+        show="headings",
+        style="Sales.Treeview"
+    )
+
+
+
+    sales_tree.heading("Bill", text="Bill No")
+    sales_tree.heading("Customer", text="Customer")
+    sales_tree.heading("Contact", text="Contact")
+    sales_tree.heading("Payment", text="Payment")
+    sales_tree.heading("Amount", text="Amount")
+    sales_tree.heading("Date", text="Date")
+    sales_tree.heading("Time", text="Time")
+
+    sales_tree.heading("Bill", text="Bill No")
+    sales_tree.heading("Customer", text="Customer")
+    sales_tree.heading("Contact", text="Contact")
+    sales_tree.heading("Payment", text="Payment")
+    sales_tree.heading("Amount", text="Amount")
+    sales_tree.heading("Date", text="Date")
+    sales_tree.heading("Time", text="Time")
+
+    scroll = Scrollbar(
+        table_frame,
+        orient="vertical",
+        command=sales_tree.yview
+    )
+
+    sales_tree.configure(
+        yscrollcommand=scroll.set
+    )
+
+    scroll.pack(side="right", fill="y")
+
+    sales_tree.pack(
+        fill="both",
+        expand=True
+    )
+
+    def this_month_report():
+
+        today = datetime.date.today()
+
+        first = today.replace(day=1)
+
+        from_cal.set_date(first)
+
+        to_cal.set_date(today)
+
+        load_sales_report()
+
+    def load_sales_report():
+
+        sales_tree.delete(*sales_tree.get_children())
+
+        from_date = from_cal.get()
+        to_date = to_cal.get()
+
+        with sqlite3.connect(DB_PATH) as conn:
+
+            c = conn.cursor()
+
+            c.execute("""
+                SELECT
+                    bill_no,
+                    customer_name,
+                    contact,
+                    payment_mode,
+                    total,
+                    bill_date,
+                    bill_time
+                FROM bill_master
+                WHERE bill_date BETWEEN ? AND ?
+                ORDER BY bill_id DESC
+            """, (from_date, to_date))
+
+            rows = c.fetchall()
+
+        total_sales = 0
+        total_bills = 0
+
+        cash = 0
+        upi = 0
+        card = 0
+
+        for row in rows:
+
+            payment = row[3]
+            amount = float(row[4])
+
+            total_sales += amount
+            total_bills += 1
+
+            if payment == "Cash":
+                cash += amount
+                payment_text = "💵 Cash"
+
+            elif payment == "UPI":
+                upi += amount
+                payment_text = "📱 UPI"
+
+            elif payment == "Card":
+                card += amount
+                payment_text = "💳 Card"
+
+            else:
+                payment_text = payment
+
+            sales_tree.insert(
+                "",
+                END,
+                values=(
+                    row[0],
+                    row[1],
+                    row[2],
+                    payment_text,
+                    f"₹{amount:,.2f}",
+                    row[5],
+                    row[6]
+                )
+            )
+
+        total_sales_var.set(f"₹{total_sales:,.2f}")
+        bill_count_var.set(str(total_bills))
+        cash_var.set(f"₹{cash:,.2f}")
+        upi_var.set(f"₹{upi:,.2f}")
+        card_var.set(f"₹{card:,.2f}")
+
+
+
+
+
+    Label(
+        filter_frame,
+        text="From",
+        bg="#FFF8E7",
+        font=("Segoe UI", 10, "bold")
+    ).grid(row=0, column=0, padx=5)
+
+    from_cal = DateEntry(
+        filter_frame,
+        width=12,
+        date_pattern="dd-mm-yyyy"
+    )
+    from_cal.grid(row=0, column=1, padx=5)
+
+    Label(
+        filter_frame,
+        text="To",
+        bg="#FFF8E7",
+        font=("Segoe UI", 10, "bold")
+    ).grid(row=0, column=2, padx=5)
+
+    to_cal = DateEntry(
+        filter_frame,
+        width=12,
+        date_pattern="dd-mm-yyyy"
+    )
+    to_cal.grid(row=0, column=3, padx=5)
+
+    Button(
+        filter_frame,
+        text="🔍 Search",
+        bg="#3B82F6",
+        fg="white",
+        font=("Segoe UI", 10, "bold"),
+        command=load_sales_report,
+        width=12
+    ).grid(row=0, column=4, padx=10)
+
+    Button(
+        filter_frame,
+        text="📅 Today",
+        bg="#10B981",
+        fg="white",
+        font=("Segoe UI", 10, "bold"),
+        command=lambda: (
+            from_cal.set_date(datetime.date.today()),
+            to_cal.set_date(datetime.date.today()),
+            load_sales_report()
+        ),
+        width=12
+    ).grid(row=0, column=5, padx=5)
+
+    Button(
+        filter_frame,
+        text="🗓 This Month",
+        bg="#F59E0B",
+        fg="white",
+        font=("Segoe UI", 10, "bold"),
+        command=this_month_report,
+        width=14
+    ).grid(row=0, column=6, padx=5)
+    load_sales_report()
+
+def open_stock_report(search_stock=None, load_stock=None):
+    stock_win = Toplevel(window)
+    stock_win.title("Stock Report")
+    stock_win.state("zoomed")
+    stock_win.configure(bg="#FFF8E7")
+    stock_win.grab_set()
+
+    top = Frame(stock_win, bg="#10B981")
+    top.pack(fill="x")
+
+    Label(
+        top,
+        text="📦 Stock Report",
+        bg="#10B981",
+        fg="white",
+        font=("Segoe UI", 22, "bold")
+    ).pack(pady=(15, 2))
+
+    Label(
+        top,
+        text="View Current Inventory Status",
+        bg="#10B981",
+        fg="white",
+        font=("Segoe UI", 10)
+    ).pack(pady=(0, 12))
+
+    Button(
+        top,
+        text="← Back",
+        bg="#EF4444",
+        fg="white",
+        font=("Segoe UI", 10, "bold"),
+        command=stock_win.destroy
+    ).place(relx=.98, rely=.08, anchor="ne")
+    total_products_var = StringVar(value="0")
+    inventory_var = StringVar(value="₹0")
+    low_stock_var = StringVar(value="0")
+    out_stock_var = StringVar(value="0")
+    summary = Frame(stock_win, bg="#FFF8E7")
+    summary.pack(fill="x", padx=15, pady=15)
+
+    # create_card(summary, "Products", total_products_var, "#3B82F6")
+    create_card(summary, "Products", total_products_var, "#3B82F6").pack(side="left", padx=8)
+    create_card(summary, "Inventory ₹", inventory_var, "#10B981").pack(side="left", padx=8)
+    create_card(summary, "Low Stock", low_stock_var, "#F59E0B").pack(side="left", padx=8)
+    create_card(summary, "Out Of Stock", out_stock_var, "#EF4444").pack(side="left", padx=8)
+
+
+    search_var = StringVar()
+
+    # search_frame = Frame(stock_win, bg="#FFF8E7")
+    # search_frame.pack(fill="x", padx=15)
+    #
+    # Entry(
+    #     search_frame,
+    #     textvariable=search_var,
+    #     width=40,
+    #     font=("Segoe UI", 11)
+    # ).pack(side="left", padx=5)
+    search_frame = Frame(stock_win, bg="#FFF8E7")
+    search_frame.pack(fill="x", padx=20, pady=10)
+
+    Label(
+        search_frame,
+        text="🔍 Search Product :",
+        bg="#FFF8E7",
+        font=("Segoe UI", 11, "bold")
+    ).pack(side="left")
+
+    search_var = StringVar()
+
+    search_entry = Entry(
+        search_frame,
+        textvariable=search_var,
+        width=35,
+        font=("Segoe UI", 11)
+    )
+    search_entry.pack(side="left", padx=10)
+
+    Button(
+        search_frame,
+        text="Search",
+        bg="#3B82F6",
+        fg="white",
+        font=("Segoe UI", 10, "bold"),
+        width=12,
+        command=search_stock
+    ).pack(side="left", padx=5)
+
+    Button(
+        search_frame,
+        text="Refresh",
+        bg="#10B981",
+        fg="white",
+        font=("Segoe UI", 10, "bold"),
+        width=12,
+        command=load_stock
+    ).pack(side="left", padx=5)
+    table_frame = Frame(stock_win, bg="#FFF8E7")
+    table_frame.pack(fill="both", expand=True, padx=20, pady=10)
+    style = ttk.Style()
+    style.theme_use("clam")
+
+    style.configure(
+        "Stock.Treeview",
+        background="#FFFDF7",
+        foreground="#374151",
+        fieldbackground="#FFFDF7",
+        rowheight=34,
+        font=("Segoe UI", 10)
+    )
+
+    style.configure(
+        "Stock.Treeview.Heading",
+        background="#10B981",
+        foreground="white",
+        font=("Segoe UI", 11, "bold")
+    )
+    stock_tree = ttk.Treeview(
+        table_frame,
+        columns=(
+            "ID",
+            "Product",
+            "Category",
+            "Stock",
+            "MRP",
+            "Selling"
+        ),
+        show="headings",
+        style="Stock.Treeview"
+    )
+    stock_tree.heading("ID", text="ID")
+    stock_tree.heading("Product", text="Product")
+    stock_tree.heading("Category", text="Category")
+    stock_tree.heading("Stock", text="Stock")
+    stock_tree.heading("MRP", text="MRP")
+    stock_tree.heading("Selling", text="Selling Price")
+    stock_tree.column("ID", width=90, anchor="center")
+    stock_tree.column("Product", width=350)
+    stock_tree.column("Category", width=170)
+    stock_tree.column("Stock", width=120, anchor="center")
+    stock_tree.column("MRP", width=120, anchor="e")
+    stock_tree.column("Selling", width=140, anchor="e")
+    scroll = Scrollbar(table_frame)
+
+    scroll.pack(side="right", fill="y")
+
+    stock_tree.configure(
+        yscrollcommand=scroll.set
+    )
+
+    scroll.config(command=stock_tree.yview)
+
+    stock_tree.pack(fill="both", expand=True)
+
+    def load_stock():
+
+        stock_tree.delete(*stock_tree.get_children())
+
+        with sqlite3.connect(DB_PATH) as conn:
+
+            c = conn.cursor()
+
+            c.execute("""
+                SELECT
+                    productid,
+                    name,
+                    category,
+                    quantity,
+                    mrp,
+                    sell_price
+                FROM product_master
+                ORDER BY name
+            """)
+
+            rows = c.fetchall()
+
+        total_products = 0
+        inventory = 0
+        low_stock = 0
+        out_stock = 0
+
+        for row in rows:
+
+            qty = int(row[3])
+            sell = float(row[5])
+
+            total_products += 1
+            inventory += qty * sell
+
+            if qty < 10:
+                low_stock += 1
+
+            if qty == 0:
+                out_stock += 1
+
+            stock_tree.insert("", END, values=row)
+
+        total_products_var.set(str(total_products))
+        inventory_var.set(f"₹{inventory:,.2f}")
+        low_stock_var.set(str(low_stock))
+        out_stock_var.set(str(out_stock))
+
+    def search_stock():
+
+        key = search_var.get().strip()
+
+        stock_tree.delete(*stock_tree.get_children())
+
+        with sqlite3.connect(DB_PATH) as conn:
+            c = conn.cursor()
+
+            c.execute("""
+                SELECT
+                    productid,
+                    name,
+                    category,
+                    quantity,
+                    mrp,
+                    sell_price
+                FROM product_master
+                WHERE
+                    name LIKE ?
+                    OR category LIKE ?
+                ORDER BY name
+            """, (f"%{key}%", f"%{key}%"))
+
+            rows = c.fetchall()
+
+        for row in rows:
+            stock_tree.insert("", END, values=row)
+
+    load_stock()
+def open_customer_report():
+
+    report_win = Toplevel(window)
+    report_win.title("Customer Report")
+    report_win.state("zoomed")
+    report_win.configure(bg="#FFF8E7")
+    report_win.grab_set()
+
+    # ================= HEADER =================
+
+    top = Frame(report_win, bg="#8B5CF6")
+    top.pack(fill="x")
+
+    Label(
+        top,
+        text="👥 Customer Report",
+        bg="#8B5CF6",
+        fg="white",
+        font=("Segoe UI", 22, "bold")
+    ).pack(pady=(12, 2))
+
+    Label(
+        top,
+        text="Customer Purchase Summary",
+        bg="#8B5CF6",
+        fg="white",
+        font=("Segoe UI", 10)
+    ).pack(pady=(0, 12))
+
+    Button(
+        top,
+        text="← Back",
+        bg="#EF4444",
+        fg="white",
+        font=("Segoe UI", 10, "bold"),
+        command=report_win.destroy
+    ).place(relx=.98, rely=.08, anchor="ne")
+
+    # ================= VARIABLES =================
+
+    total_customer_var = StringVar(value="0")
+    total_sales_var = StringVar(value="₹0")
+    repeat_customer_var = StringVar(value="0")
+    today_customer_var = StringVar(value="0")
+
+    # ================= SUMMARY =================
+
+    summary = Frame(report_win, bg="#FFF8E7")
+    summary.pack(fill="x", padx=20, pady=15)
+
+    create_card(
+        summary,
+        "Customers",
+        total_customer_var,
+        "#3B82F6"
+    ).pack(side="left", padx=8)
+
+    create_card(
+        summary,
+        "Sales ₹",
+        total_sales_var,
+        "#10B981"
+    ).pack(side="left", padx=8)
+
+    create_card(
+        summary,
+        "Repeat",
+        repeat_customer_var,
+        "#F59E0B"
+    ).pack(side="left", padx=8)
+
+    create_card(
+        summary,
+        "Today's",
+        today_customer_var,
+        "#8B5CF6"
+    ).pack(side="left", padx=8)
+
+    # ================= SEARCH =================
+
+    search_var = StringVar()
+
+    search_frame = Frame(report_win, bg="#FFF8E7")
+    search_frame.pack(fill="x", padx=20, pady=8)
+
+    Label(
+        search_frame,
+        text="🔍 Search :",
+        bg="#FFF8E7",
+        font=("Segoe UI",11,"bold")
+    ).pack(side="left")
+
+    Entry(
+        search_frame,
+        textvariable=search_var,
+        width=35,
+        font=("Segoe UI",11)
+    ).pack(side="left", padx=10)
+
+    search_btn = Button(
+        search_frame,
+        text="Search",
+        bg="#3B82F6",
+        fg="white",
+        width=12,
+        font=("Segoe UI", 10, "bold")
+    )
+
+    search_btn.pack(side="left", padx=5)
+
+    refresh_btn = Button(
+        search_frame,
+        text="Refresh",
+        bg="#10B981",
+        fg="white",
+        width=12,
+        font=("Segoe UI", 10, "bold")
+    )
+
+    refresh_btn.pack(side="left", padx=5)
+
+    # ================= TABLE =================
+
+    table_frame = Frame(report_win, bg="#FFF8E7")
+    table_frame.pack(fill="both", expand=True, padx=20, pady=10)
+
+    style = ttk.Style()
+    style.theme_use("clam")
+
+    style.configure(
+        "CustomerReport.Treeview",
+        background="#FFFDF7",
+        foreground="#374151",
+        fieldbackground="#FFFDF7",
+        rowheight=34,
+        font=("Segoe UI",10)
+    )
+
+    style.configure(
+        "CustomerReport.Treeview.Heading",
+        background="#8B5CF6",
+        foreground="white",
+        font=("Segoe UI",11,"bold")
+    )
+
+    customer_tree = ttk.Treeview(
+        table_frame,
+        columns=(
+            "Name",
+            "Mobile",
+            "Bills",
+            "Purchase",
+            "Last"
+        ),
+        show="headings",
+        style="CustomerReport.Treeview"
+    )
+
+    customer_tree.heading("Name", text="Customer")
+    customer_tree.heading("Mobile", text="Mobile")
+    customer_tree.heading("Bills", text="Bills")
+    customer_tree.heading("Purchase", text="Total Purchase")
+    customer_tree.heading("Last", text="Last Visit")
+
+    customer_tree.column("Name", width=320)
+    customer_tree.column("Mobile", width=170, anchor="center")
+    customer_tree.column("Bills", width=100, anchor="center")
+    customer_tree.column("Purchase", width=170, anchor="e")
+    customer_tree.column("Last", width=150, anchor="center")
+
+    scroll = Scrollbar(
+        table_frame,
+        orient="vertical",
+        command=customer_tree.yview
+    )
+
+    customer_tree.configure(
+        yscrollcommand=scroll.set
+    )
+
+    scroll.pack(side="right", fill="y")
+
+    customer_tree.pack(fill="both", expand=True)
+    # ================= LOAD REPORT =================
+
+    def load_customers():
+
+        customer_tree.delete(*customer_tree.get_children())
+
+        with sqlite3.connect(DB_PATH) as conn:
+
+            c = conn.cursor()
+
+            c.execute("""
+                SELECT
+                    cm.customer_name,
+                    cm.mobile,
+                    COUNT(b.bill_id),
+                    IFNULL(SUM(b.total),0),
+                    IFNULL(MAX(b.bill_date),'')
+                FROM customer_master cm
+                LEFT JOIN bill_master b
+                    ON cm.customer_name=b.customer_name
+                GROUP BY
+                    cm.customer_id
+                ORDER BY
+                    cm.customer_name
+            """)
+
+            rows=c.fetchall()
+
+        total_customers=0
+        total_sales=0
+        repeat_customers=0
+
+        today=datetime.datetime.now().strftime("%d-%m-%Y")
+        today_count=0
+
+        for row in rows:
+
+            bills=int(row[2])
+            sales=float(row[3])
+
+            total_customers+=1
+            total_sales+=sales
+
+            if bills>1:
+                repeat_customers+=1
+
+            if row[4]==today:
+                today_count+=1
+
+            customer_tree.insert(
+                "",
+                END,
+                values=(
+                    row[0],
+                    row[1],
+                    bills,
+                    f"₹{sales:,.2f}",
+                    row[4]
+                )
+            )
+
+        total_customer_var.set(str(total_customers))
+        total_sales_var.set(f"₹{total_sales:,.2f}")
+        repeat_customer_var.set(str(repeat_customers))
+        today_customer_var.set(str(today_count))
+    load_customers()
+def open_reports():
+
+    report_win = Toplevel(window)
+    report_win.title("Reports")
+    report_win.state("zoomed")
+    report_win.configure(bg="#FFF8E7")
+    report_win.grab_set()
+
+    # ================= Background =================
+
+    top_frame = Frame(report_win, bg="#4ECDC4")
+    top_frame.place(relx=0, rely=0, relwidth=1, relheight=0.30)
+
+    bottom_frame = Frame(report_win, bg="#FFF8E7")
+    bottom_frame.place(relx=0, rely=0.30, relwidth=1, relheight=0.70)
+
+    # ================= Header =================
+
+    Label(
+        top_frame,
+        text="Reports",
+        bg="#4ECDC4",
+        fg="white",
+        font=("Segoe UI", 28, "bold")
+    ).pack(pady=(35,8))
+
+    Label(
+        top_frame,
+        text="View Sales, Stock, Customer and Payment Reports",
+        bg="#4ECDC4",
+        fg="white",
+        font=("Segoe UI",12)
+    ).pack()
+
+    # ================= Buttons =================
+
+    btn_frame = Frame(bottom_frame,bg="#FFF8E7")
+    btn_frame.pack(expand=True)
+
+    Button(
+        btn_frame,
+        text="💰\nSales Report",
+        width=18,
+        height=4,
+        bg="#3B82F6",
+        fg="white",
+        font=("Segoe UI",18,"bold"),
+        relief="flat",
+        cursor="hand2",
+        command=open_sales_report
+    ).grid(row=0,column=0,padx=35,pady=35)
+
+    Button(
+        btn_frame,
+        text="📦\nStock Report",
+        width=18,
+        height=4,
+        bg="#10B981",
+        fg="white",
+        font=("Segoe UI",18,"bold"),
+        relief="flat",
+        command=open_stock_report,
+        cursor="hand2"
+    ).grid(row=0,column=1,padx=35,pady=35)
+
+    Button(
+        btn_frame,
+        text="👥\nCustomer Report",
+        width=18,
+        height=4,
+        bg="#F59E0B",
+        fg="white",
+        font=("Segoe UI",18,"bold"),
+        command=open_customer_report,
+        relief="flat",
+        cursor="hand2"
+    ).grid(row=1,column=0,padx=35,pady=35)
+
+    Button(
+        btn_frame,
+        text="🏆\nTop Selling",
+        width=18,
+        height=4,
+        bg="#8B5CF6",
+        fg="white",
+        font=("Segoe UI",18,"bold"),
+        relief="flat",
+        cursor="hand2"
+    ).grid(row=1,column=1,padx=35,pady=35)
+
+    # Button(
+    #     bottom_frame,
+    #     text="← Back",
+    #     bg="#EF4444",
+    #     fg="white",
+    #     font=("Segoe UI", 11, "bold"),
+    #     width=15,
+    #     relief="flat",
+    #     cursor="hand2",
+    #     command=report_win.destroy
+    # ).place(relx=0.02, rely=0.04, anchor="w")
+
+    Button(
+        report_win,
+        text="← Back",
+        bg="#EF4444",
+        fg="white",
+        font=("Segoe UI", 11, "bold"),
+        width=12,
+        relief="flat",
+        cursor="hand2",
+        command=report_win.destroy
+    ).place(relx=0.015, rely=0.03, anchor="nw")
+ # load_sales_report()
 
 def open_newbill(add_to_cart=None, generate_bill=None, search_customer=None):
     newbill_win = Toplevel(window)
@@ -1456,6 +2392,117 @@ def open_newbill(add_to_cart=None, generate_bill=None, search_customer=None):
                 END,
                 f"{row[1]}   |   {row[0]}   |   {row[2]}"
             )
+
+    def show_customer_history(event=None):
+
+        selected = customer_tree.selection()
+
+        if not selected:
+            return
+
+        values = customer_tree.item(selected[0])["values"]
+
+        customer_name = values[0]
+
+        history = Toplevel(report_win)
+        history.title(customer_name + " - Purchase History")
+        history.state("zoomed")
+        history.configure(bg="#FFF8E7")
+        history.grab_set()
+
+        Label(
+            history,
+            text=f"👤 {customer_name}",
+            bg="#8B5CF6",
+            fg="white",
+            font=("Segoe UI", 22, "bold")
+        ).pack(fill="x", pady=(0, 10))
+        tree = ttk.Treeview(
+            history,
+            columns=(
+                "Bill",
+                "Date",
+                "Time",
+                "Payment",
+                "Amount"
+            ),
+            show="headings"
+        )
+
+        tree.heading("Bill", text="Bill No")
+        tree.heading("Date", text="Date")
+        tree.heading("Time", text="Time")
+        tree.heading("Payment", text="Payment")
+        tree.heading("Amount", text="Amount")
+
+        tree.column("Bill", width=130, anchor="center")
+        tree.column("Date", width=130, anchor="center")
+        tree.column("Time", width=120, anchor="center")
+        tree.column("Payment", width=140, anchor="center")
+        tree.column("Amount", width=150, anchor="e")
+
+        tree.pack(fill="both", expand=True, padx=15, pady=10)
+        with sqlite3.connect(DB_PATH) as conn:
+            c = conn.cursor()
+
+            c.execute("""
+                SELECT
+                    bill_no,
+                    bill_date,
+                    bill_time,
+                    payment_mode,
+                    total
+                FROM bill_master
+                WHERE customer_name=?
+                ORDER BY bill_id DESC
+            """, (customer_name,))
+
+            rows = c.fetchall()
+
+        total_purchase = 0
+
+        for row in rows:
+            total_purchase += float(row[4])
+
+            tree.insert(
+                "",
+                END,
+                values=(
+                    row[0],
+                    row[1],
+                    row[2],
+                    row[3],
+                    f"₹{row[4]:,.2f}"
+                )
+            )
+        bottom = Frame(history, bg="#FFF8E7")
+        bottom.pack(fill="x", pady=10)
+
+        Label(
+            bottom,
+            text=f"Total Bills : {len(rows)}",
+            bg="#FFF8E7",
+            fg="#1E3A5F",
+            font=("Segoe UI", 12, "bold")
+        ).pack(side="left", padx=20)
+
+        Label(
+            bottom,
+            text=f"Total Purchase : ₹{total_purchase:,.2f}",
+            bg="#FFF8E7",
+            fg="#10B981",
+            font=("Segoe UI", 12, "bold")
+        ).pack(side="left", padx=20)
+
+        Button(
+            bottom,
+            text="Close",
+            bg="#EF4444",
+            fg="white",
+            font=("Segoe UI", 10, "bold"),
+            command=history.destroy
+        ).pack(side="right", padx=20)
+
 
     contact_entry.bind("<KeyRelease>", search_customer)
 
@@ -1888,9 +2935,6 @@ def open_newbill(add_to_cart=None, generate_bill=None, search_customer=None):
     # --- 3 Buttons Side by Side ---
     action_frame = Frame(right_frame, bg="#E7C582")
     action_frame.pack(fill="x", padx=5, pady=5)
-    # Button(action_frame, text="Remove", bg="#E74C3C", fg="white",
-    #        font=("arial", 11, "bold"),
-    #        command=remove_selected).grid(row=0, column=0, padx=3, pady=3, sticky="ew")
 
     qty_frame = Frame(right_frame, bg="#FFF1E6")
     qty_frame.pack(pady=8)
@@ -2085,24 +3129,6 @@ def open_newbill(add_to_cart=None, generate_bill=None, search_customer=None):
             command=confirm_qty
         ).pack(pady=10)
 
-    def remove_selected():
-
-        selected = cart_tree.selection()
-
-        if not selected:
-            messagebox.showerror("Error", "No item selected.")
-            return
-
-        cart_tree.delete(selected[0])
-
-        # Renumber serial numbers
-        for index, item in enumerate(cart_tree.get_children(), start=1):
-            values = list(cart_tree.item(item)["values"])
-            values[0] = index
-            cart_tree.item(item, values=values)
-
-        update_bill_totals()
-
         # ----- Button Frame -----
     button_frame = Frame(left_frame, bg="#F0F4FF")
     button_frame.pack(pady=10)
@@ -2145,13 +3171,6 @@ def open_newbill(add_to_cart=None, generate_bill=None, search_customer=None):
     # ---------------- Selected Date Heading ----------------
     selected_date_var = StringVar()
 
-    Label(
-        bills_win,
-        textvariable=selected_date_var,
-        font=("Segoe UI", 16, "bold"),
-        bg="#FFF8E7",
-        fg="#1E3A8A"
-    ).pack(pady=(8, 5))
 
     summary_frame = Frame(left_frame, bg="#EEF2FF", relief="ridge", bd=2)
     summary_frame.pack(fill="x", padx=10, pady=10)
@@ -2244,22 +3263,6 @@ window.title("Billing App")
 window.state("zoomed")
 window.configure(bg="#6BADA0")
 
-# Load background image
-# bg_image = Image.open("C:\\Users\\DELL\\Downloads\\billingbg1.jpg")   # replace with your image file
-# import os, sys
-# if getattr(sys, 'frozen', False):
-#     base_dir = os.path.dirname(sys.executable)
-# else:
-#     base_dir = os.path.dirname(os.path.abspath(__file__))
-#
-# bg_image = Image.open(os.path.join(base_dir, "billingbg1.jpg"))
-# bg_image = bg_image.resize((window.winfo_screenwidth(), window.winfo_screenheight()))
-# bg_photo = ImageTk.PhotoImage(bg_image)
-
-# # Place background label
-# bg_label = Label(window, image=bg_photo)
-# bg_label.place(x=0, y=0, relwidth=1, relheight=1)
-
 # ---------------- MAIN WINDOW THEME ----------------
 top_frame = Frame(window, bg="#4ECDC4")   # Aqua Teal
 top_frame.place(relx=0, rely=0, relwidth=1, relheight=0.42)
@@ -2340,7 +3343,7 @@ Button(
     fg="#1F2937",
     bd=0,
     cursor="hand2",
-    # command=open_reports
+    command=open_reports
 ).grid(row=1, column=1, padx=20, pady=20)
 
 window.mainloop()
