@@ -1,5 +1,71 @@
 import os
 import sys
+import barcode
+from barcode.writer import ImageWriter
+import os
+import win32print
+import win32ui
+from PIL import ImageWin
+
+import win32print
+
+
+def print_tspl_label(barcode_no, product_name, mrp, sell_price, qty):
+
+    printer_name = "4BARCODE 4B-2054N"
+
+    hPrinter = win32print.OpenPrinter(printer_name)
+
+    try:
+
+        tspl = f"""
+SIZE 38 mm,38 mm
+GAP 2 mm,0 mm
+DENSITY 10
+SPEED 4
+DIRECTION 1
+REFERENCE 0,0
+OFFSET 0 mm
+CLS
+
+BARCODE 15,20,"128",70,1,0,2,2,"{barcode_no}"
+
+TEXT 60,100,"3",0,1,1,"{barcode_no}"
+
+BAR 10,125,280,2
+
+TEXT 10,140,"3",0,1,1,"BUGZY"
+
+TEXT 10,170,"2",0,1,1,"{product_name[:20]}"
+
+TEXT 10,200,"2",0,1,1,"MRP : {mrp}"
+
+TEXT 10,225,"2",0,1,1,"Price : {sell_price}"
+
+TEXT 10,250,"2",0,1,1,"Qty : {qty}"
+
+PRINT 1
+"""
+
+        hJob = win32print.StartDocPrinter(
+            hPrinter,
+            1,
+            ("Barcode Label", None, "RAW")
+        )
+
+        win32print.StartPagePrinter(hPrinter)
+
+        win32print.WritePrinter(
+            hPrinter,
+            tspl.encode("utf-8")
+        )
+
+        win32print.EndPagePrinter(hPrinter)
+        win32print.EndDocPrinter(hPrinter)
+
+    finally:
+        win32print.ClosePrinter(hPrinter)
+
 
 if getattr(sys, "frozen", False):
     BASE_DIR = os.path.dirname(sys.executable)
@@ -7,6 +73,8 @@ else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 DB_PATH = os.path.join(BASE_DIR, "store.db")
+
+
 import datetime
 from tkcalendar import DateEntry
 from tkinter import *
@@ -15,6 +83,68 @@ from tkinter import ttk
 from PIL import Image, ImageTk   # use Pillow for JPG/PNG
 from tkinter import ttk, messagebox
 print("Using database:", DB_PATH)
+
+
+
+def enable_cell_copy(tree):
+    """
+    Lets the user right-click a Treeview cell to copy its value (or the
+    whole row), and press Ctrl+C to copy the last-clicked cell.
+    Call this once on any ttk.Treeview right after it's created.
+    """
+    last_cell = {"row": None, "col": None}
+
+    def remember_cell(event):
+        region = tree.identify("region", event.x, event.y)
+        if region != "cell":
+            return
+        row = tree.identify_row(event.y)
+        col = tree.identify_column(event.x)
+        if row and col:
+            last_cell["row"] = row
+            last_cell["col"] = col
+
+    def get_cell_value():
+        row, col = last_cell["row"], last_cell["col"]
+        if not row or not col:
+            return None
+        try:
+            col_index = int(col.replace("#", "")) - 1
+        except ValueError:
+            return None
+        values = tree.item(row)["values"]
+        if values and 0 <= col_index < len(values):
+            return values[col_index]
+        return None
+
+    def copy_cell(event=None):
+        value = get_cell_value()
+        if value is not None:
+            tree.clipboard_clear()
+            tree.clipboard_append(str(value))
+
+    def copy_row(event=None):
+        row = last_cell["row"] or (tree.selection()[0] if tree.selection() else None)
+        if not row:
+            return
+        values = tree.item(row)["values"]
+        text = "\t".join(str(v) for v in values)
+        tree.clipboard_clear()
+        tree.clipboard_append(text)
+
+    def show_context_menu(event):
+        remember_cell(event)
+        row = tree.identify_row(event.y)
+        if row:
+            tree.selection_set(row)
+        menu = Menu(tree, tearoff=0)
+        menu.add_command(label="📋 Copy Cell", command=copy_cell)
+        menu.add_command(label="📋 Copy Row", command=copy_row)
+        menu.tk_popup(event.x_root, event.y_root)
+
+    tree.bind("<Button-1>", remember_cell, add="+")
+    tree.bind("<Button-3>", show_context_menu)
+    tree.bind("<Control-c>", copy_cell)
 
 def open_customers():
     cust_win = Toplevel(window)
@@ -102,106 +232,6 @@ def open_customers():
 
 
 def add_customer(parent, mobile="", callback=None):
-
-    add_win = Toplevel(parent)
-    add_win.title("Add Customer")
-    add_win.geometry("700x450")
-    add_win.configure(bg="#D6EAF8")
-    add_win.grab_set()
-    customer_id = int(datetime.datetime.now().timestamp())
-    entry_time = datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S")
-    Label(
-        add_win,
-        text=f"Customer ID : {customer_id}",
-        font=("arial",14,"bold"),
-        bg="#D6EAF8"
-    ).pack(pady=15)
-    name_var = StringVar()
-    mobile_var = StringVar(value=mobile)
-    address_var = StringVar()
-    Label(add_win,text="Customer Name",font=("arial",12,"bold"),bg="#FFF8E7",fg="374151").pack()
-    Entry(
-        add_win,
-        textvariable=name_var,
-        font=("Segoe UI",11),
-        width=35,
-        relief = "solid",
-        ds=1
-    ).pack(pady=5)
-    Label(add_win,text="Mobile Number",font=("arial",12,"bold"),bg="#FFF8E7",fg="374151").pack()
-    Entry(
-        add_win,
-        textvariable=mobile_var,
-        font=("Segoe UI",11),
-        width=35,
-        relief="solid",
-        ds=1
-    ).pack(pady=5)
-    Label(add_win,text="Address / City",font=("arial",12,"bold"),bg="#FFF8E7",fg="374151").pack()
-    Entry(
-        add_win,
-        textvariable=address_var,
-        font=("Segoe UI",11),
-        width=35,
-        relief="solid",
-        ds=1
-    ).pack(pady=5)
-    def save_customer():
-        if name_var.get().strip()=="":
-            messagebox.showerror(
-                "Error",
-                "Customer Name is required."
-            )
-            return
-        if mobile_var.get().strip()=="":
-            messagebox.showerror(
-                "Error",
-                "Mobile Number is required."
-            )
-            return
-        try:
-            with sqlite3.connect(DB_PATH) as conn:
-                c=conn.cursor()
-                c.execute("""
-                INSERT INTO customer_master
-                VALUES(?,?,?,?,?)
-                """,
-                (
-                    customer_id,
-                    name_var.get().strip(),
-                    mobile_var.get().strip(),
-                    address_var.get().strip(),
-                    entry_time
-                ))
-
-                conn.commit()
-
-            messagebox.showinfo(
-                "Success",
-                "Customer Added Successfully."
-            )
-
-            if callback:
-                callback()
-
-            add_win.destroy()
-
-        except sqlite3.IntegrityError:
-
-            messagebox.showerror(
-                "Duplicate",
-                "This mobile number already exists."
-            )
-    Button(
-        add_win,
-        text="Save Customer",
-        bg="#22C55E",
-        fg="white",
-        font=("arial",14,"bold"),
-        command=save_customer
-    ).pack(pady=25)
-# def add_customer(parent):
-def add_customer(parent, mobile="", callback=None):
     win = Toplevel(parent)
     win.title("Add Customer")
     win.geometry("600x450")
@@ -273,16 +303,12 @@ def add_customer(parent, mobile="", callback=None):
         command=save_customer
     ).pack(pady=25)
 
-def show_all_customers(parent, load_customers=None):
+def show_all_customers(parent):
 
     win = Toplevel(parent)
     win.title("Customer Details")
     win.state("zoomed")
     win.configure(bg="#FFF8E7")
-    search_var = StringVar()
-
-    top_frame = Frame(win, bg="#3B82F6")
-    top_frame.pack(fill="x")
 
     # ================= Header =================
 
@@ -335,7 +361,7 @@ def show_all_customers(parent, load_customers=None):
         fg="white",
         font=("Segoe UI", 10, "bold"),
         width=12,
-        command=lambda: search_customer
+        command=lambda: search_customer()
     )
 
     search_btn.pack(side="left", padx=5)
@@ -347,7 +373,7 @@ def show_all_customers(parent, load_customers=None):
         fg="white",
         font=("Segoe UI", 10, "bold"),
         width=12,
-        command=load_customers
+        command=lambda: refresh_customer()
     )
 
     refresh_btn.pack(side="left", padx=5)
@@ -393,6 +419,7 @@ def show_all_customers(parent, load_customers=None):
         padx=15,
         pady=(5, 10)
     )
+    enable_cell_copy(tree)
 
     def load_customers():
 
@@ -411,59 +438,6 @@ def show_all_customers(parent, load_customers=None):
 
         for row in rows:
             tree.insert("", END, values=row)
-
-    def search_customer():
-
-        key=search_var.get().strip()
-
-        customer_tree.delete(*customer_tree.get_children())
-
-        with sqlite3.connect(DB_PATH) as conn:
-
-            c=conn.cursor()
-
-            c.execute("""
-
-                SELECT
-                    cm.customer_name,
-                    cm.mobile,
-                    COUNT(b.bill_id),
-                    IFNULL(SUM(b.total),0),
-                    IFNULL(MAX(b.bill_date),'')
-
-                FROM customer_master cm
-
-                LEFT JOIN bill_master b
-                ON cm.customer_name=b.customer_name
-
-                WHERE
-
-                    cm.customer_name LIKE ?
-                    OR cm.mobile LIKE ?
-
-                GROUP BY
-                    cm.customer_id
-
-                ORDER BY
-                    cm.customer_name
-
-            """,(f"%{key}%",f"%{key}%"))
-
-            rows=c.fetchall()
-
-        for row in rows:
-
-            customer_tree.insert(
-                "",
-                END,
-                values=(
-                    row[0],
-                    row[1],
-                    row[2],
-                    f"₹{row[3]:,.2f}",
-                    row[4]
-                )
-            )
 
     def search_customer():
 
@@ -493,13 +467,95 @@ def show_all_customers(parent, load_customers=None):
             tree.insert("", "end", values=row)
 
     def refresh_customer():
-
         search_var.set("")
         load_customers()
 
+    def update_customer():
+        selected = tree.selection()
+        if not selected:
+            messagebox.showerror("Error", "No customer selected")
+            return
 
-    def refresh_customer():
-        search_var.set("")
+        vals = tree.item(selected[0])["values"]
+        customer_id = vals[0]
+
+        upd_win = Toplevel(win)
+        upd_win.title("Update Customer")
+        upd_win.geometry("400x350")
+        upd_win.configure(bg="#D6EAF8")
+        upd_win.grab_set()
+
+        name_var = StringVar(value=vals[1])
+        mobile_var = StringVar(value=vals[2])
+        address_var = StringVar(value=vals[3])
+
+        for lbl, var in [
+            ("Customer Name", name_var),
+            ("Mobile Number", mobile_var),
+            ("Address / City", address_var)
+        ]:
+            Label(upd_win, text=lbl, font=("arial", 12, "bold"), bg="#D6EAF8").pack(pady=(15, 0))
+            Entry(upd_win, textvariable=var, width=30, font=("arial", 12)).pack(pady=5)
+
+        def save_update():
+            if name_var.get().strip() == "":
+                messagebox.showerror("Error", "Customer Name is required.")
+                return
+            if mobile_var.get().strip() == "":
+                messagebox.showerror("Error", "Mobile Number is required.")
+                return
+            try:
+                with sqlite3.connect(DB_PATH) as conn:
+                    c = conn.cursor()
+                    c.execute("""
+                        UPDATE customer_master
+                        SET customer_name=?, mobile=?, address=?
+                        WHERE customer_id=?
+                    """, (
+                        name_var.get().strip(),
+                        mobile_var.get().strip(),
+                        address_var.get().strip(),
+                        customer_id
+                    ))
+                    conn.commit()
+                messagebox.showinfo("Updated", "Customer updated successfully!")
+                upd_win.destroy()
+                load_customers()
+            except sqlite3.IntegrityError:
+                messagebox.showerror("Duplicate", "This mobile number already exists.")
+
+        Button(
+            upd_win,
+            text="Save Update",
+            bg="#27AE60",
+            fg="white",
+            font=("arial", 12, "bold"),
+            command=save_update
+        ).pack(pady=20)
+
+    def delete_customer():
+        selected = tree.selection()
+        if not selected:
+            messagebox.showerror("Error", "No customer selected")
+            return
+
+        vals = tree.item(selected[0])["values"]
+        customer_id = vals[0]
+        customer_name = vals[1]
+
+        confirm = messagebox.askyesno(
+            "Confirm Delete",
+            f"Are you sure you want to delete customer '{customer_name}'?"
+        )
+        if not confirm:
+            return
+
+        with sqlite3.connect(DB_PATH) as conn:
+            c = conn.cursor()
+            c.execute("DELETE FROM customer_master WHERE customer_id=?", (customer_id,))
+            conn.commit()
+
+        messagebox.showinfo("Deleted", f"Customer '{customer_name}' deleted successfully!")
         load_customers()
 
     bottom_frame = Frame(win, bg="#FFF8E7")
@@ -510,7 +566,8 @@ def show_all_customers(parent, load_customers=None):
         bg="#3B82F6",
         fg="white",
         font=("Segoe UI", 11, "bold"),
-        width=14
+        width=14,
+        command=update_customer
     )
 
     update_btn.pack(side="left", padx=10)
@@ -521,7 +578,8 @@ def show_all_customers(parent, load_customers=None):
         bg="#EF4444",
         fg="white",
         font=("Segoe UI", 11, "bold"),
-        width=14
+        width=14,
+        command=delete_customer
     )
 
     delete_btn.pack(side="left", padx=10)
@@ -702,6 +760,210 @@ def add_product(parent_win):
     # Focus on first field
     entries["Product Name"].focus_set()
 
+    # Barcode value = product id, zero-padded to 6 digits
+    barcode_value = str(productid)[-6:]  # last 6 digits of timestamp id, keeps it short
+
+    barcode_frame = Frame(add_win, bg="#FFF8E7")
+    barcode_frame.place(relx=0.1, rely=0.90, relwidth=0.80, relheight=0.08)
+
+    Label(barcode_frame, text=f"Barcode: {barcode_value}", font=("Segoe UI", 12, "bold"),
+          bg="#FFF8E7", fg="#1F2937").pack(side="left", padx=10)
+
+    def generate_and_print_label():
+        # Validate required fields first
+        if not name_var.get().strip():
+            messagebox.showerror("Error", "Enter Product Name first.")
+            return
+
+        # 1. Generate barcode image
+        # code128 = barcode.get("code128", barcode_value, writer=ImageWriter())
+
+        from barcode.writer import ImageWriter
+
+        writer = ImageWriter()
+        writer.set_options({
+            "write_text": False,  # <-- remove built-in number
+            "module_width": 0.35,
+            "module_height": 18,
+            "quiet_zone": 2,
+            "font_size": 0
+        })
+
+        # code128 = barcode.get("code128", barcode_value, writer=writer)
+        from barcode.writer import ImageWriter
+
+        writer = ImageWriter()
+
+        writer.set_options({
+            "write_text": False,
+            "module_height": 20,
+            "module_width": 0.4,
+            "quiet_zone": 2
+        })
+
+        code128 = barcode.get(
+            "code128",
+            barcode_value,
+            writer=writer
+        )
+        barcode_folder = "barcodes"
+        os.makedirs(barcode_folder, exist_ok=True)
+        barcode_path = code128.save(os.path.join(barcode_folder, f"barcode_{barcode_value}"))
+        # barcode_path -> e.g. "barcodes/barcode_123456.png"
+
+        # 2. Build the label (barcode + text) using PIL
+        from PIL import Image, ImageDraw, ImageFont
+
+        barcode_img = Image.open(barcode_path)
+
+        label_w = 304
+        label_h = 304
+
+        label = Image.new("RGB", (label_w, label_h), "white")
+        draw = ImageDraw.Draw(label)
+
+        # Barcode nearly full width
+        barcode_width = 290
+        barcode_height = 105
+
+        bc_resized = barcode_img.resize(
+            (barcode_width, barcode_height),
+            Image.Resampling.LANCZOS
+        )
+
+        x = (label_w - barcode_width) // 2
+        label.paste(bc_resized, (x, 10))
+
+        draw = ImageDraw.Draw(label)
+        try:
+            title_font = ImageFont.truetype("arialbd.ttf", 30)
+            text_font = ImageFont.truetype("arialbd.ttf", 23)
+        except:
+            title_font = ImageFont.load_default()
+            text_font = ImageFont.load_default()
+
+        # Barcode Number (centered below barcode)
+
+        barcode_text = barcode_value
+
+        bbox = draw.textbbox((0, 0), barcode_text, font=title_font)
+        text_width = bbox[2] - bbox[0]
+
+        draw.text(
+            ((label_w - text_width) // 2, 165),
+            barcode_text,
+            fill="black",
+            font=title_font
+        )
+
+        # ---------------- Divider ----------------
+        draw.line(
+            [(35, 205), (270, 205)],
+            fill="black",
+            width=2
+        )
+
+        # ---------------- Product Details ----------------
+
+        y = 220
+
+        draw.text(
+            (20, y),
+            "BUGZY",
+            font=title_font,
+            fill="black"
+        )
+
+        y += 40
+
+        draw.text(
+            (20, y),
+            name_var.get(),
+            font=text_font,
+            fill="black"
+        )
+
+        y += 35
+
+        draw.text(
+            (20, y),
+            f"MRP : ₹{mrp_var.get():.2f}",
+            font=text_font,
+            fill="black"
+        )
+
+        y += 35
+
+        draw.text(
+            (20, y),
+            f"Price : ₹{sell_var.get():.2f}",
+            font=text_font,
+            fill="black"
+        )
+
+        y += 35
+
+        draw.text(
+            (35, y),
+            f"Qty : {qty_var.get()}",
+            font=text_font,
+            fill="black"
+        )
+
+        # 3. Save final label and open it (for printing via default image viewer)
+        final_path = os.path.join(barcode_folder, f"label_{barcode_value}.png")
+        label.save(final_path)
+        # os.startfile(final_path, "print")  # sends straight to default printer
+        print_tspl_label(
+            barcode_value,
+            name_var.get(),
+            mrp_var.get(),
+            sell_var.get(),
+            qty_var.get()
+        )
+        messagebox.showinfo("Success", f"Label generated & sent to printer.\nBarcode: {barcode_value}")
+
+    Button(barcode_frame, text="🖨 Generate & Print Barcode Label", font=("Segoe UI", 11, "bold"),
+           bg="#6366F1", fg="white", relief="flat", cursor="hand2",
+           command=generate_and_print_label).pack(side="left", padx=15)
+
+    def print_image_to_printer(image_path):
+
+        printer_name = win32print.GetDefaultPrinter()
+
+        # hDC = win32ui.CreateDC()
+        # hDC.CreatePrinterDC(printer_name)
+        hDC = win32ui.CreateDC()
+        hDC.CreatePrinterDC("4BARCODE 4B-2054N")
+
+        printable_area = hDC.GetDeviceCaps(8), hDC.GetDeviceCaps(10)
+
+        bmp = Image.open(image_path)
+
+        # Image size in pixels
+        img_w, img_h = bmp.size
+
+        dib = ImageWin.Dib(bmp)
+
+        hDC.StartDoc("Barcode Label")
+        hDC.StartPage()
+
+        LEFT_OFFSET = 8  # adjust 5-15 pixels
+        TOP_OFFSET = 0
+
+        dib.draw(
+            hDC.GetHandleOutput(),
+            (
+                LEFT_OFFSET,
+                TOP_OFFSET,
+                img_w + LEFT_OFFSET,
+                img_h + TOP_OFFSET
+            )
+        )
+
+        hDC.EndPage()
+        hDC.EndDoc()
+        hDC.DeleteDC()
     # ================= Save Button =================
     def save_product():
         if name_var.get().strip() == "":
@@ -720,10 +982,15 @@ def add_product(parent_win):
                                 category TEXT,
                                 entry_time TEXT
                             )""")
-                c.execute("INSERT INTO product_master VALUES (?,?,?,?,?,?,?,?)",
-                          (productid, name_var.get().strip(), sell_var.get(),
-                           wholesale_var.get(), qty_var.get(), mrp_var.get(),
-                           cat_var.get().strip(), timestamp))
+                # c.execute("INSERT INTO product_master VALUES (?,?,?,?,?,?,?,?)",
+                #           (productid, name_var.get().strip(), sell_var.get(),
+                #            wholesale_var.get(), qty_var.get(), mrp_var.get(),
+                #            cat_var.get().strip(), timestamp))
+                c.execute("""
+                    INSERT INTO product_master (productid, name, sell_price, wholesale_price, quantity, mrp, category, entry_time, barcode)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (productid, name_var.get(), sell_var.get(), wholesale_var.get(),
+                      qty_var.get(), mrp_var.get(), cat_var.get(), timestamp, barcode_value))
                 conn.commit()
             messagebox.showinfo("Success", f"Product '{name_var.get()}' saved successfully!")
             add_win.destroy()
@@ -765,6 +1032,7 @@ def show_all_products(parent_win):
         tree.heading(col, text=col)
         tree.column(col, width=120)
     tree.pack(fill="both", expand=True, padx=10, pady=10)
+    enable_cell_copy(tree)
 
     # Load data
     def load_products():
@@ -1023,6 +1291,7 @@ def open_bills():
     # Make Payment column slightly narrower
     bill_tree.column("Payment", width=120, anchor="center")
     bill_tree.pack(fill="x", padx=10, pady=10)
+    enable_cell_copy(bill_tree)
 
     # --- Items Table (shown on bill selection) ---
     Label(bills_win, text="Bill Items", font=("Segoe UI", 12, "bold"), bg="#FFF8E7", fg="#1F2937").pack()
@@ -1032,6 +1301,7 @@ def open_bills():
         item_tree.heading(col, text=col)
         item_tree.column(col, width=200)
     item_tree.pack(fill="both", padx=10, pady=5)
+    enable_cell_copy(item_tree)
 
     def load_bills():
         bill_tree.delete(*bill_tree.get_children())
@@ -1180,6 +1450,41 @@ def create_card(parent, title, variable, bg):
     ).pack()
 
     return card
+def create_clickable_card(parent, title, variable, bg, command):
+
+    card = Frame(
+        parent,
+        bg=bg,
+        width=220,
+        height=95,
+        relief="flat",
+        bd=0
+    )
+
+    card.pack_propagate(False)
+
+    value_lbl = Label(
+        card,
+        textvariable=variable,
+        bg=bg,
+        fg="white",
+        cursor="hand2",
+        font=("Segoe UI", 18, "bold", "underline")
+    )
+
+    value_lbl.pack(pady=(15,0))
+
+    Label(
+        card,
+        text=title,
+        bg=bg,
+        fg="white",
+        font=("Segoe UI",10)
+    ).pack()
+
+    value_lbl.bind("<Button-1>", lambda e: command())
+
+    return card
 
 def open_sales_report():
     sales_win = Toplevel(window)
@@ -1287,14 +1592,6 @@ def open_sales_report():
     sales_tree.heading("Date", text="Date")
     sales_tree.heading("Time", text="Time")
 
-    sales_tree.heading("Bill", text="Bill No")
-    sales_tree.heading("Customer", text="Customer")
-    sales_tree.heading("Contact", text="Contact")
-    sales_tree.heading("Payment", text="Payment")
-    sales_tree.heading("Amount", text="Amount")
-    sales_tree.heading("Date", text="Date")
-    sales_tree.heading("Time", text="Time")
-
     scroll = Scrollbar(
         table_frame,
         orient="vertical",
@@ -1311,6 +1608,7 @@ def open_sales_report():
         fill="both",
         expand=True
     )
+    enable_cell_copy(sales_tree)
 
     def this_month_report():
 
@@ -1466,9 +1764,18 @@ def open_sales_report():
         command=this_month_report,
         width=14
     ).grid(row=0, column=6, padx=5)
+    Button(
+        filter_frame,
+        text="📆 Month wise Sell",
+        bg="#8B5CF6",
+        fg="white",
+        font=("Segoe UI", 10, "bold"),
+        # command=open_month_wise_sales,
+        width=16
+    ).grid(row=0, column=7, padx=5)
     load_sales_report()
 
-def open_stock_report(search_stock=None, load_stock=None):
+def open_stock_report():
     stock_win = Toplevel(window)
     stock_win.title("Stock Report")
     stock_win.state("zoomed")
@@ -1509,24 +1816,138 @@ def open_stock_report(search_stock=None, load_stock=None):
     summary = Frame(stock_win, bg="#FFF8E7")
     summary.pack(fill="x", padx=15, pady=15)
 
+    def show_low_stock():
+
+        win = Toplevel(stock_win)
+        win.title("Low Stock Products")
+        win.geometry("900x550")
+        win.configure(bg="#FFF8E7")
+        win.grab_set()
+
+        Label(
+            win,
+            text="🟡 Low Stock Products",
+            bg="#F59E0B",
+            fg="white",
+            font=("Segoe UI", 18, "bold")
+        ).pack(fill="x")
+
+        tree = ttk.Treeview(
+            win,
+            columns=("Name", "Category", "Qty", "Price"),
+            show="headings"
+        )
+
+        tree.heading("Name", text="Product")
+        tree.heading("Category", text="Category")
+        tree.heading("Qty", text="Qty")
+        tree.heading("Price", text="Selling Price")
+
+        tree.column("Name", width=320)
+        tree.column("Category", width=180)
+        tree.column("Qty", width=100, anchor="center")
+        tree.column("Price", width=120, anchor="e")
+
+        tree.pack(fill="both", expand=True, padx=15, pady=15)
+
+        with sqlite3.connect(DB_PATH) as conn:
+            c = conn.cursor()
+
+            c.execute("""
+                SELECT
+                    name,
+                    category,
+                    quantity,
+                    sell_price
+                FROM product_master
+                WHERE quantity > 0
+                  AND quantity <= 5
+                ORDER BY quantity ASC, name ASC
+            """)
+
+            rows = c.fetchall()
+
+        for row in rows:
+            tree.insert("", END, values=row)
+
+        Button(
+            win,
+            text="Close",
+            bg="#EF4444",
+            fg="white",
+            font=("Segoe UI", 10, "bold"),
+            command=win.destroy
+        ).pack(pady=10)
+
+    def show_out_stock():
+
+        win = Toplevel(stock_win)
+        win.title("Out Of Stock Products")
+        win.geometry("900x550")
+        win.configure(bg="#FFF8E7")
+        win.grab_set()
+
+        Label(
+            win,
+            text="🔴 Out Of Stock Products",
+            bg="#EF4444",
+            fg="white",
+            font=("Segoe UI", 18, "bold")
+        ).pack(fill="x")
+
+        tree = ttk.Treeview(
+            win,
+            columns=("Name", "Category", "Qty", "Price"),
+            show="headings"
+        )
+
+        tree.heading("Name", text="Product")
+        tree.heading("Category", text="Category")
+        tree.heading("Qty", text="Qty")
+        tree.heading("Price", text="Selling Price")
+
+        tree.column("Name", width=320)
+        tree.column("Category", width=180)
+        tree.column("Qty", width=100, anchor="center")
+        tree.column("Price", width=120, anchor="e")
+
+        tree.pack(fill="both", expand=True, padx=15, pady=15)
+
+        with sqlite3.connect(DB_PATH) as conn:
+            c = conn.cursor()
+
+            c.execute("""
+                SELECT
+                    name,
+                    category,
+                    quantity,
+                    sell_price
+                FROM product_master
+                WHERE quantity = 0
+                ORDER BY name
+            """)
+
+            rows = c.fetchall()
+
+        for row in rows:
+            tree.insert("", END, values=row)
+
+        Button(
+            win,
+            text="Close",
+            bg="#EF4444",
+            fg="white",
+            font=("Segoe UI", 10, "bold"),
+            command=win.destroy
+        ).pack(pady=10)
+
     # create_card(summary, "Products", total_products_var, "#3B82F6")
     create_card(summary, "Products", total_products_var, "#3B82F6").pack(side="left", padx=8)
     create_card(summary, "Inventory ₹", inventory_var, "#10B981").pack(side="left", padx=8)
-    create_card(summary, "Low Stock", low_stock_var, "#F59E0B").pack(side="left", padx=8)
-    create_card(summary, "Out Of Stock", out_stock_var, "#EF4444").pack(side="left", padx=8)
+    create_clickable_card(summary, "Low Stock", low_stock_var, "#F59E0B",show_low_stock).pack(side="left", padx=8)
+    create_clickable_card(summary, "Out Of Stock", out_stock_var, "#EF4444",show_out_stock).pack(side="left", padx=8)
 
 
-    search_var = StringVar()
-
-    # search_frame = Frame(stock_win, bg="#FFF8E7")
-    # search_frame.pack(fill="x", padx=15)
-    #
-    # Entry(
-    #     search_frame,
-    #     textvariable=search_var,
-    #     width=40,
-    #     font=("Segoe UI", 11)
-    # ).pack(side="left", padx=5)
     search_frame = Frame(stock_win, bg="#FFF8E7")
     search_frame.pack(fill="x", padx=20, pady=10)
 
@@ -1554,7 +1975,7 @@ def open_stock_report(search_stock=None, load_stock=None):
         fg="white",
         font=("Segoe UI", 10, "bold"),
         width=12,
-        command=search_stock
+        command=lambda: search_stock()
     ).pack(side="left", padx=5)
 
     Button(
@@ -1564,7 +1985,7 @@ def open_stock_report(search_stock=None, load_stock=None):
         fg="white",
         font=("Segoe UI", 10, "bold"),
         width=12,
-        command=load_stock
+        command=lambda: load_stock()
     ).pack(side="left", padx=5)
     table_frame = Frame(stock_win, bg="#FFF8E7")
     table_frame.pack(fill="both", expand=True, padx=20, pady=10)
@@ -1614,6 +2035,7 @@ def open_stock_report(search_stock=None, load_stock=None):
     scroll = Scrollbar(table_frame)
 
     scroll.pack(side="right", fill="y")
+    enable_cell_copy(stock_tree)
 
     stock_tree.configure(
         yscrollcommand=scroll.set
@@ -1699,6 +2121,8 @@ def open_stock_report(search_stock=None, load_stock=None):
 
         for row in rows:
             stock_tree.insert("", END, values=row)
+
+
 
     load_stock()
 def open_customer_report():
@@ -1806,7 +2230,8 @@ def open_customer_report():
         bg="#3B82F6",
         fg="white",
         width=12,
-        font=("Segoe UI", 10, "bold")
+        font=("Segoe UI", 10, "bold"),
+        command=lambda: search_customers()
     )
 
     search_btn.pack(side="left", padx=5)
@@ -1817,7 +2242,8 @@ def open_customer_report():
         bg="#10B981",
         fg="white",
         width=12,
-        font=("Segoe UI", 10, "bold")
+        font=("Segoe UI", 10, "bold"),
+        command=lambda: (search_var.set(""), load_customers())
     )
 
     refresh_btn.pack(side="left", padx=5)
@@ -1884,6 +2310,7 @@ def open_customer_report():
     scroll.pack(side="right", fill="y")
 
     customer_tree.pack(fill="both", expand=True)
+    enable_cell_copy(customer_tree)
     # ================= LOAD REPORT =================
 
     def load_customers():
@@ -1949,7 +2376,383 @@ def open_customer_report():
         total_sales_var.set(f"₹{total_sales:,.2f}")
         repeat_customer_var.set(str(repeat_customers))
         today_customer_var.set(str(today_count))
+
+    def search_customers():
+
+        key = search_var.get().strip()
+
+        customer_tree.delete(*customer_tree.get_children())
+
+        with sqlite3.connect(DB_PATH) as conn:
+
+            c = conn.cursor()
+
+            c.execute("""
+                SELECT
+                    cm.customer_name,
+                    cm.mobile,
+                    COUNT(b.bill_id),
+                    IFNULL(SUM(b.total),0),
+                    IFNULL(MAX(b.bill_date),'')
+                FROM customer_master cm
+                LEFT JOIN bill_master b
+                    ON cm.customer_name=b.customer_name
+                WHERE
+                    cm.customer_name LIKE ?
+                    OR cm.mobile LIKE ?
+                GROUP BY
+                    cm.customer_id
+                ORDER BY
+                    cm.customer_name
+            """, (f"%{key}%", f"%{key}%"))
+
+            rows = c.fetchall()
+
+        for row in rows:
+            customer_tree.insert(
+                "",
+                END,
+                values=(
+                    row[0],
+                    row[1],
+                    int(row[2]),
+                    f"₹{float(row[3]):,.2f}",
+                    row[4]
+                )
+            )
+
     load_customers()
+
+    def show_customer_history(event=None):
+
+        selected = customer_tree.selection()
+
+        if not selected:
+            return
+
+        values = customer_tree.item(selected[0])["values"]
+
+        customer_name = values[0]
+
+        history = Toplevel(report_win)
+        history.title(customer_name + " - Purchase History")
+        history.state("zoomed")
+        history.configure(bg="#FFF8E7")
+        history.grab_set()
+
+        Label(
+            history,
+            text=f"👤 {customer_name}",
+            bg="#8B5CF6",
+            fg="white",
+            font=("Segoe UI", 22, "bold")
+        ).pack(fill="x", pady=(0, 10))
+
+        hist_tree = ttk.Treeview(
+            history,
+            columns=(
+                "Bill",
+                "Date",
+                "Time",
+                "Payment",
+                "Amount"
+            ),
+            show="headings"
+        )
+
+        hist_tree.heading("Bill", text="Bill No")
+        hist_tree.heading("Date", text="Date")
+        hist_tree.heading("Time", text="Time")
+        hist_tree.heading("Payment", text="Payment")
+        hist_tree.heading("Amount", text="Amount")
+
+        hist_tree.column("Bill", width=130, anchor="center")
+        hist_tree.column("Date", width=130, anchor="center")
+        hist_tree.column("Time", width=120, anchor="center")
+        hist_tree.column("Payment", width=140, anchor="center")
+        hist_tree.column("Amount", width=150, anchor="e")
+
+        hist_tree.pack(fill="both", expand=True, padx=15, pady=10)
+        enable_cell_copy(hist_tree)
+        with sqlite3.connect(DB_PATH) as conn:
+            c = conn.cursor()
+
+            c.execute("""
+                SELECT
+                    bill_no,
+                    bill_date,
+                    bill_time,
+                    payment_mode,
+                    total
+                FROM bill_master
+                WHERE customer_name=?
+                ORDER BY bill_id DESC
+            """, (customer_name,))
+
+            rows = c.fetchall()
+
+        total_purchase = 0
+
+        for row in rows:
+            total_purchase += float(row[4])
+
+            hist_tree.insert(
+                "",
+                END,
+                values=(
+                    row[0],
+                    row[1],
+                    row[2],
+                    row[3],
+                    f"₹{row[4]:,.2f}"
+                )
+            )
+
+        bottom = Frame(history, bg="#FFF8E7")
+        bottom.pack(fill="x", pady=10)
+
+        Label(
+            bottom,
+            text=f"Total Bills : {len(rows)}",
+            bg="#FFF8E7",
+            fg="#1E3A5F",
+            font=("Segoe UI", 12, "bold")
+        ).pack(side="left", padx=20)
+
+        Label(
+            bottom,
+            text=f"Total Purchase : ₹{total_purchase:,.2f}",
+            bg="#FFF8E7",
+            fg="#10B981",
+            font=("Segoe UI", 12, "bold")
+        ).pack(side="left", padx=20)
+
+        Button(
+            bottom,
+            text="Close",
+            bg="#EF4444",
+            fg="white",
+            font=("Segoe UI", 10, "bold"),
+            command=history.destroy
+        ).pack(side="right", padx=20)
+
+    customer_tree.bind("<Double-1>", show_customer_history)
+
+def open_business_analytics():
+
+    analytics_win = Toplevel(window)
+    analytics_win.title("Business Analytics")
+    analytics_win.state("zoomed")
+    analytics_win.configure(bg="#F8FAFC")
+    analytics_win.grab_set()
+
+    # ---------------- Header ----------------
+
+    top = Frame(
+        analytics_win,
+        bg="#0F766E",
+        height=170
+    )
+
+    top.pack(fill="x")
+    top.pack_propagate(False)
+
+    Label(
+        top,
+        text="📊 Business Analytics",
+        bg="#0F766E",
+        fg="white",
+        font=("Segoe UI",26,"bold")
+    ).pack(pady=(20,5))
+
+    Label(
+        top,
+        text="Month Wise Sales & Profit",
+        bg="#0F766E",
+        fg="white",
+        font=("Segoe UI",11)
+    ).pack()
+
+    Button(
+        top,
+        text="← Back",
+        bg="#EF4444",
+        fg="white",
+        font=("Segoe UI",10,"bold"),
+        command=analytics_win.destroy
+    ).place(relx=.98,rely=.18,anchor="ne")
+
+    # ---------------- Cards Area ----------------
+
+    body = Frame(
+        analytics_win,
+        bg="#F8FAFC"
+    )
+
+    body.pack(
+        fill="both",
+        expand=True,
+        padx=20,
+        pady=20
+    )
+
+    # Equal row sizes
+    for r in range(3):
+        body.grid_rowconfigure(
+            r,
+            weight=1,
+            uniform="rows"
+        )
+
+    # Equal column sizes
+    for c in range(4):
+        body.grid_columnconfigure(
+            c,
+            weight=1,
+            uniform="months"
+        )
+    months = [
+        "January", "February", "March",
+        "April", "May", "June",
+        "July", "August", "September",
+        "October", "November", "December"
+    ]
+
+    current_year = datetime.datetime.now().year
+
+    def create_month_card(parent, month, index):
+
+        colors = [
+            "#EFF6FF", "#ECFDF5", "#FEF3C7",
+            "#F3E8FF", "#FCE7F3", "#E0F2FE",
+            "#DCFCE7", "#FEF9C3", "#FFE4E6",
+            "#EDE9FE", "#F0FDF4", "#FFF7ED"
+        ]
+
+        card = Frame(
+            parent,
+            bg=colors[index],
+            width=340,
+            height=195,
+            highlightbackground="#D1D5DB",
+            highlightthickness=1,
+            cursor="hand2"
+        )
+
+        card.grid_propagate(False)
+        # card.grid(
+        #     row=r,
+        #     column=c,
+        #     padx=18,
+        #     pady=18
+        # )
+
+        title = Label(
+            card,
+            text=f"🗓 {month} {current_year}",
+            bg=colors[index],
+            fg="#111827",
+            font=("Segoe UI", 13, "bold")
+        )
+        title.pack(pady=(6, 2))
+
+        sales_var = StringVar(value="₹0")
+        profit_var = StringVar(value="₹0")
+        bills_var = StringVar(value="🧾 0 Bills")
+
+        sales_lbl = Label(
+            card,
+            textvariable=sales_var,
+            bg=colors[index],
+            fg="#2563EB",
+            font=("Segoe UI", 20, "bold")
+        )
+        sales_lbl.pack()
+
+        Label(
+            card,
+            text="Sales",
+            bg=colors[index],
+            fg="gray35",
+            font=("Segoe UI", 9)
+        ).pack()
+
+        profit_lbl = Label(
+            card,
+            textvariable=profit_var,
+            bg=colors[index],
+            fg="#059669",
+            font=("Segoe UI", 17, "bold")
+        )
+        profit_lbl.pack(pady=(2, 0))
+
+        Label(
+            card,
+            text="Profit",
+            bg=colors[index],
+            fg="gray35",
+            font=("Segoe UI", 9)
+        ).pack()
+
+        bills_lbl = Label(
+            card,
+            textvariable=bills_var,
+            bg=colors[index],
+            fg="#7C3AED",
+            font=("Segoe UI", 11, "bold")
+        )
+        bills_lbl.pack(pady=(2, 2))
+
+        def enter(e):
+            card.config(highlightbackground="#2563EB", highlightthickness=3)
+
+        def leave(e):
+            card.config(highlightbackground="#D1D5DB", highlightthickness=1)
+
+        for w in (card, title, sales_lbl, profit_lbl, bills_lbl):
+            w.bind("<Enter>", enter)
+            w.bind("<Leave>", leave)
+
+        return card, sales_var, profit_var, bills_var
+
+        def open_month():
+            messagebox.showinfo(
+                month,
+                f"Detailed report for {month} {current_year}\n\nComing Soon..."
+            )
+
+        for w in (
+                card,
+                title,
+                sales_lbl,
+                profit_lbl,
+                bills_lbl
+        ):
+            w.bind("<Button-1>", lambda e: open_month())
+    cards = []
+
+    for i, month in enumerate(months):
+        card, sale, profit, bills = create_month_card(body, month,i)
+
+        r = i // 4
+        c = i % 4
+
+        card.grid(
+            row=r,
+            column=c,
+            padx=18,
+            pady=18,
+            sticky="nsew"
+        )
+
+        cards.append((month, sale, profit, bills))
+
+    # for i in range(3):
+    #     body.grid_columnconfigure(i, weight=1)
+    # for i in range(4):
+    #     body.grid_rowconfigure(i, weight=1, uniform="cols")
+
+
 def open_reports():
 
     report_win = Toplevel(window)
@@ -1960,100 +2763,15 @@ def open_reports():
 
     # ================= Background =================
 
-    top_frame = Frame(report_win, bg="#4ECDC4")
-    top_frame.place(relx=0, rely=0, relwidth=1, relheight=0.30)
+    top_frame = Frame(report_win, bg="#4ECDC4", height=150)
+    top_frame.pack(fill="x")
+    top_frame.pack_propagate(False)
 
     bottom_frame = Frame(report_win, bg="#FFF8E7")
-    bottom_frame.place(relx=0, rely=0.30, relwidth=1, relheight=0.70)
+    bottom_frame.pack(fill="both", expand=True)
 
-    # ================= Header =================
-
-    Label(
+    Button(
         top_frame,
-        text="Reports",
-        bg="#4ECDC4",
-        fg="white",
-        font=("Segoe UI", 28, "bold")
-    ).pack(pady=(35,8))
-
-    Label(
-        top_frame,
-        text="View Sales, Stock, Customer and Payment Reports",
-        bg="#4ECDC4",
-        fg="white",
-        font=("Segoe UI",12)
-    ).pack()
-
-    # ================= Buttons =================
-
-    btn_frame = Frame(bottom_frame,bg="#FFF8E7")
-    btn_frame.pack(expand=True)
-
-    Button(
-        btn_frame,
-        text="💰\nSales Report",
-        width=18,
-        height=4,
-        bg="#3B82F6",
-        fg="white",
-        font=("Segoe UI",18,"bold"),
-        relief="flat",
-        cursor="hand2",
-        command=open_sales_report
-    ).grid(row=0,column=0,padx=35,pady=35)
-
-    Button(
-        btn_frame,
-        text="📦\nStock Report",
-        width=18,
-        height=4,
-        bg="#10B981",
-        fg="white",
-        font=("Segoe UI",18,"bold"),
-        relief="flat",
-        command=open_stock_report,
-        cursor="hand2"
-    ).grid(row=0,column=1,padx=35,pady=35)
-
-    Button(
-        btn_frame,
-        text="👥\nCustomer Report",
-        width=18,
-        height=4,
-        bg="#F59E0B",
-        fg="white",
-        font=("Segoe UI",18,"bold"),
-        command=open_customer_report,
-        relief="flat",
-        cursor="hand2"
-    ).grid(row=1,column=0,padx=35,pady=35)
-
-    Button(
-        btn_frame,
-        text="🏆\nTop Selling",
-        width=18,
-        height=4,
-        bg="#8B5CF6",
-        fg="white",
-        font=("Segoe UI",18,"bold"),
-        relief="flat",
-        cursor="hand2"
-    ).grid(row=1,column=1,padx=35,pady=35)
-
-    # Button(
-    #     bottom_frame,
-    #     text="← Back",
-    #     bg="#EF4444",
-    #     fg="white",
-    #     font=("Segoe UI", 11, "bold"),
-    #     width=15,
-    #     relief="flat",
-    #     cursor="hand2",
-    #     command=report_win.destroy
-    # ).place(relx=0.02, rely=0.04, anchor="w")
-
-    Button(
-        report_win,
         text="← Back",
         bg="#EF4444",
         fg="white",
@@ -2062,10 +2780,137 @@ def open_reports():
         relief="flat",
         cursor="hand2",
         command=report_win.destroy
-    ).place(relx=0.015, rely=0.03, anchor="nw")
- # load_sales_report()
+    ).place(relx=0.98, rely=0.12, anchor="ne")
 
-def open_newbill(add_to_cart=None, generate_bill=None, search_customer=None):
+
+    # ================= Header =================
+
+    Button(
+        top_frame,
+        text="← Back",
+        bg="#EF4444",
+        fg="white",
+        font=("Segoe UI", 11, "bold"),
+        width=12,
+        relief="flat",
+        cursor="hand2",
+        command=report_win.destroy
+    ).place(relx=0.98, rely=0.18, anchor="ne")
+
+    Label(
+        top_frame,
+        text="Reports",
+        bg="#4ECDC4",
+        fg="white",
+        font=("Segoe UI", 28, "bold")
+    ).pack(pady=(30, 8))
+
+    Label(
+        top_frame,
+        text="View Sales, Stock, Customer and Payment Reports",
+        bg="#4ECDC4",
+        fg="white",
+        font=("Segoe UI", 12)
+    ).pack()
+
+    # ================= Buttons =================
+
+    # ================= Buttons =================
+
+    btn_frame = Frame(bottom_frame, bg="#FFF8E7")
+    btn_frame.pack(expand=True)
+
+    for i in range(3):
+        btn_frame.grid_columnconfigure(i, weight=1)
+
+    # ---------- Row 1 ----------
+
+    Button(
+        btn_frame,
+        text="💰\nSales Report",
+        width=16,
+        height=3,
+        bg="#3B82F6",
+        fg="white",
+        font=("Segoe UI", 18, "bold"),
+        relief="flat",
+        cursor="hand2",
+        command=open_sales_report
+    ).grid(row=0, column=0, padx=25, pady=25)
+
+    Button(
+        btn_frame,
+        text="📦\nStock Report",
+        width=16,
+        height=3,
+        bg="#10B981",
+        fg="white",
+        font=("Segoe UI", 18, "bold"),
+        relief="flat",
+        cursor="hand2",
+        command=open_stock_report
+    ).grid(row=0, column=1, padx=25, pady=25)
+
+    Button(
+        btn_frame,
+        text="👥\nCustomer Report",
+        width=16,
+        height=3,
+        bg="#F59E0B",
+        fg="white",
+        font=("Segoe UI", 18, "bold"),
+        relief="flat",
+        cursor="hand2",
+        command=open_customer_report
+    ).grid(row=0, column=2, padx=25, pady=25)
+
+    # ---------- Row 2 ----------
+
+    Button(
+        btn_frame,
+        text="🏆\nTop Selling",
+        width=16,
+        height=3,
+        bg="#8B5CF6",
+        fg="white",
+        font=("Segoe UI", 18, "bold"),
+        relief="flat",
+        cursor="hand2"
+    ).grid(row=1, column=0, padx=25, pady=25)
+
+    Button(
+        btn_frame,
+        text="📊\nBusiness Analytics",
+        width=16,
+        height=3,
+        bg="#0F766E",
+        fg="white",
+        font=("Segoe UI", 18, "bold"),
+        relief="flat",
+        cursor="hand2",
+        command=open_business_analytics
+    ).grid(row=1, column=1, padx=25, pady=25)
+    print("Business Analytics button created")
+
+    Button(
+        btn_frame,
+        text="💳\nPayment Report",
+        width=16,
+        height=3,
+        bg="#EC4899",
+        fg="white",
+        font=("Segoe UI", 18, "bold"),
+        relief="flat",
+        cursor="hand2"
+        # command=open_payment_report
+    ).grid(row=1, column=2, padx=25, pady=25)
+    print("Payment Report button created")
+
+
+
+    btn_frame.pack(expand=True)
+
+def open_newbill(search_frame=None, scan_barcode=None):
     newbill_win = Toplevel(window)
     newbill_win.title("New Bill")
     newbill_win.state("zoomed")
@@ -2212,17 +3057,6 @@ def open_newbill(add_to_cart=None, generate_bill=None, search_customer=None):
                 return False
 
             return int(value) <= stock
-
-        # qty_entry = Entry(cart_tree, justify="center", font=("Segoe UI", 10))
-        # vcmd = (cart_tree.register(validate_qty), "%P")
-        #
-        # qty_entry = Entry(
-        #     cart_tree,
-        #     justify="center",
-        #     font=("Segoe UI", 10),
-        #     validate="key",
-        #     validatecommand=vcmd
-        # )
 
         qty_entry = Entry(
             cart_tree,
@@ -2393,119 +3227,6 @@ def open_newbill(add_to_cart=None, generate_bill=None, search_customer=None):
                 f"{row[1]}   |   {row[0]}   |   {row[2]}"
             )
 
-    def show_customer_history(event=None):
-
-        selected = customer_tree.selection()
-
-        if not selected:
-            return
-
-        values = customer_tree.item(selected[0])["values"]
-
-        customer_name = values[0]
-
-        history = Toplevel(report_win)
-        history.title(customer_name + " - Purchase History")
-        history.state("zoomed")
-        history.configure(bg="#FFF8E7")
-        history.grab_set()
-
-        Label(
-            history,
-            text=f"👤 {customer_name}",
-            bg="#8B5CF6",
-            fg="white",
-            font=("Segoe UI", 22, "bold")
-        ).pack(fill="x", pady=(0, 10))
-        tree = ttk.Treeview(
-            history,
-            columns=(
-                "Bill",
-                "Date",
-                "Time",
-                "Payment",
-                "Amount"
-            ),
-            show="headings"
-        )
-
-        tree.heading("Bill", text="Bill No")
-        tree.heading("Date", text="Date")
-        tree.heading("Time", text="Time")
-        tree.heading("Payment", text="Payment")
-        tree.heading("Amount", text="Amount")
-
-        tree.column("Bill", width=130, anchor="center")
-        tree.column("Date", width=130, anchor="center")
-        tree.column("Time", width=120, anchor="center")
-        tree.column("Payment", width=140, anchor="center")
-        tree.column("Amount", width=150, anchor="e")
-
-        tree.pack(fill="both", expand=True, padx=15, pady=10)
-        with sqlite3.connect(DB_PATH) as conn:
-            c = conn.cursor()
-
-            c.execute("""
-                SELECT
-                    bill_no,
-                    bill_date,
-                    bill_time,
-                    payment_mode,
-                    total
-                FROM bill_master
-                WHERE customer_name=?
-                ORDER BY bill_id DESC
-            """, (customer_name,))
-
-            rows = c.fetchall()
-
-        total_purchase = 0
-
-        for row in rows:
-            total_purchase += float(row[4])
-
-            tree.insert(
-                "",
-                END,
-                values=(
-                    row[0],
-                    row[1],
-                    row[2],
-                    row[3],
-                    f"₹{row[4]:,.2f}"
-                )
-            )
-        bottom = Frame(history, bg="#FFF8E7")
-        bottom.pack(fill="x", pady=10)
-
-        Label(
-            bottom,
-            text=f"Total Bills : {len(rows)}",
-            bg="#FFF8E7",
-            fg="#1E3A5F",
-            font=("Segoe UI", 12, "bold")
-        ).pack(side="left", padx=20)
-
-        Label(
-            bottom,
-            text=f"Total Purchase : ₹{total_purchase:,.2f}",
-            bg="#FFF8E7",
-            fg="#10B981",
-            font=("Segoe UI", 12, "bold")
-        ).pack(side="left", padx=20)
-
-        Button(
-            bottom,
-            text="Close",
-            bg="#EF4444",
-            fg="white",
-            font=("Segoe UI", 10, "bold"),
-            command=history.destroy
-        ).pack(side="right", padx=20)
-
-
-    contact_entry.bind("<KeyRelease>", search_customer)
-
     def choose_customer(event):
 
         if not customer_list.curselection():
@@ -2544,13 +3265,123 @@ def open_newbill(add_to_cart=None, generate_bill=None, search_customer=None):
 
 
     # --- Product List (Left) ---
-    Label(left_frame, text="📦  Product List", font=("Segoe UI", 14, "bold"),
-          bg="#6366F1", fg="white").pack(fill="x", pady=0, ipady=10)
+    Label(
+        left_frame,
+        text="📦  Product List",
+        font=("Segoe UI", 14, "bold"),
+        bg="#6366F1",
+        fg="white"
+    ).pack(fill="x", ipady=10)
 
     search_frame = Frame(left_frame, bg="#F0F4FF")
     search_frame.pack(pady=5)
 
-    Label(search_frame, text="🔍 Search:", font=("Segoe UI", 10, "bold"), bg="#F0F4FF", fg="#1F2937").grid(row=0,
+    def scan_barcode(event=None):
+
+        print("SCAN FUNCTION CALLED")
+        barcode = barcode_scan_var.get().strip()
+
+        if barcode == "":
+            return
+
+        with sqlite3.connect(DB_PATH) as conn:
+            c = conn.cursor()
+
+            c.execute("""
+                SELECT
+                    productid,
+                    name,
+                    sell_price,
+                    quantity
+                FROM product_master
+                WHERE barcode = ?
+            """, (barcode,))
+
+            row = c.fetchone()
+
+        if row is None:
+            messagebox.showerror(
+                "Not Found",
+                "Barcode not found."
+            )
+            barcode_scan_var.set("")
+            barcode_scan_entry.focus_set()
+            return
+
+        productid, name, price, qty_avail = row
+
+        if qty_avail <= 0:
+            messagebox.showerror(
+                "Out Of Stock",
+                f"{name} is out of stock."
+            )
+            barcode_scan_var.set("")
+            barcode_scan_entry.focus_set()
+            return
+
+        add_barcode_product(
+            productid,
+            name,
+            price,
+            qty_avail
+        )
+        import winsound
+
+        winsound.MessageBeep()
+
+        barcode_scan_var.set("")
+        barcode_scan_entry.focus_set()
+        # barcode_scan_entry.bind("<Return>", scan_barcode)
+
+
+    # ---------- Barcode Scan ----------
+
+    barcode_scan_var = StringVar()
+
+    Label(
+        search_frame,
+        text="📷 Scan",
+        font=("Segoe UI", 10, "bold"),
+        bg="#F0F4FF"
+    ).grid(row=0, column=0, padx=5)
+
+    barcode_scan_entry = Entry(
+        search_frame,
+        textvariable=barcode_scan_var,
+        font=("Segoe UI", 11),
+        width=20
+    )
+
+    barcode_scan_entry.grid(row=0, column=1, padx=5)
+    barcode_scan_entry.bind("<Return>", scan_barcode)
+
+    # ---------- Product Search ----------
+
+    Label(
+        search_frame,
+        text="🔍 Barcode Search",
+        font=("Segoe UI", 10, "bold"),
+        bg="#F0F4FF"
+    ).grid(row=1, column=0, padx=5, pady=5)
+
+    search_var = StringVar()
+
+    search_entry = Entry(
+        search_frame,
+        textvariable=search_var,
+        font=("Segoe UI", 11),
+        width=20
+    )
+
+    search_entry.grid(row=1, column=1, padx=5, pady=5)
+
+    barcode_scan_entry.focus_set()
+
+
+    search_frame = Frame(left_frame, bg="#F0F4FF")
+    search_frame.pack(pady=5)
+
+    Label(search_frame, text="🔍 Product Search:", font=("Segoe UI", 10, "bold"), bg="#F0F4FF", fg="#1F2937").grid(row=0,
                                                                                                           column=0,
                                                                                                           padx=5)
     search_var = StringVar()
@@ -2568,6 +3399,7 @@ def open_newbill(add_to_cart=None, generate_bill=None, search_customer=None):
         product_tree.heading(col, text=col)
         product_tree.column(col, width=100)
     product_tree.pack(fill="both", expand=True, padx=5, pady=5)
+    enable_cell_copy(product_tree)
 
     def load_products():
         product_tree.delete(*product_tree.get_children())
@@ -2663,6 +3495,7 @@ def open_newbill(add_to_cart=None, generate_bill=None, search_customer=None):
 
         # --- Save to DB ---
         with sqlite3.connect(DB_PATH) as conn:
+
             c = conn.cursor()
             c.execute("""
                 INSERT INTO bill_master (bill_no, customer_name, contact, total, bill_date, bill_time,payment_mode)
@@ -2670,20 +3503,64 @@ def open_newbill(add_to_cart=None, generate_bill=None, search_customer=None):
             """, (bill_no, customer_name, contact, total_amount, bill_date, bill_time,payment_mode))
             bill_id = c.lastrowid
 
+            def get_wholesale_price(product_id):
+                c.execute(
+                    "SELECT wholesale_price FROM product_master WHERE productid=?",
+                    (product_id,)
+                )
+                row = c.fetchone()
+                return float(row[0]) if row else 0
+
             for vals in cart_items:
+                product_id = vals[1]
+                product_name = vals[2]
+                qty = int(vals[3])
+                sell_price = float(vals[4])
+                total = float(vals[5])
+
+                wholesale_price = get_wholesale_price(product_id)
+
+                profit = (sell_price - wholesale_price) * qty
+
                 c.execute("""
-                    INSERT INTO bill_items (bill_id, product_id, product_name, qty, price, total)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (bill_id, vals[1], vals[2], vals[3], float(vals[4]), float(vals[5])))
+                    INSERT INTO bill_items
+                    (
+                        bill_id,
+                        product_id,
+                        product_name,
+                        qty,
+                        price,
+                        total,
+                        sell_price,
+                        wholesale_price,
+                        profit
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    bill_id,
+                    product_id,
+                    product_name,
+                    qty,
+                    sell_price,
+                    total,
+                    sell_price,
+                    wholesale_price,
+                    profit
+                ))
 
                 c.execute("""
                     UPDATE product_master
-                    SET quantity = CASE
-                        WHEN quantity >= ? THEN quantity - ?
-                        ELSE quantity
-                    END
+                    SET quantity =
+                        CASE
+                            WHEN quantity >= ? THEN quantity - ?
+                            ELSE quantity
+                        END
                     WHERE productid=?
-                """, (vals[3], vals[3], vals[1]))
+                """, (
+                    qty,
+                    qty,
+                    product_id
+                ))
 
             conn.commit()
 
@@ -3130,6 +4007,66 @@ def open_newbill(add_to_cart=None, generate_bill=None, search_customer=None):
         ).pack(pady=10)
 
         # ----- Button Frame -----
+
+    def add_barcode_product(productid, name, price, qty_avail):
+
+        q = 1
+
+        total = round(float(price) * q, 2)
+
+        for item in cart_tree.get_children():
+
+            values = cart_tree.item(item)["values"]
+
+            if str(values[1]) == str(productid):
+
+                old_qty = int(values[3])
+
+                new_qty = old_qty + 1
+
+                if new_qty > qty_avail:
+                    messagebox.showerror(
+                        "Stock Error",
+                        f"Only {qty_avail} items available."
+                    )
+                    return
+
+                unit_price = float(values[4])
+
+                cart_tree.item(
+                    item,
+                    values=(
+                        values[0],
+                        values[1],
+                        values[2],
+                        new_qty,
+                        unit_price,
+                        round(unit_price * new_qty, 2)
+                    )
+                )
+
+                update_bill_totals()
+                return
+
+        sno = len(cart_tree.get_children()) + 1
+
+        cart_tree.insert(
+            "",
+            "end",
+            values=(
+                sno,
+                productid,
+                name,
+                1,
+                float(price),
+                total
+            )
+        )
+
+        update_bill_totals()
+
+
+
     button_frame = Frame(left_frame, bg="#F0F4FF")
     button_frame.pack(pady=10)
     Button(
@@ -3171,7 +4108,6 @@ def open_newbill(add_to_cart=None, generate_bill=None, search_customer=None):
     # ---------------- Selected Date Heading ----------------
     selected_date_var = StringVar()
 
-
     summary_frame = Frame(left_frame, bg="#EEF2FF", relief="ridge", bd=2)
     summary_frame.pack(fill="x", padx=10, pady=10)
     Label(summary_frame,
@@ -3212,7 +4148,8 @@ with sqlite3.connect(DB_PATH) as conn:
             contact   TEXT,
             total     REAL,
             bill_date TEXT,
-            bill_time TEXT
+            bill_time TEXT,
+            payment_mode TEXT
         )
     """)
     c.execute("""
@@ -3235,25 +4172,11 @@ with sqlite3.connect(DB_PATH) as conn:
         CREATE TABLE IF NOT EXISTS customer_master(
             customer_id INTEGER PRIMARY KEY,
             customer_name TEXT NOT NULL,
-            mobile TEXT UNIQUE,
+            mobile TEXT UNIQUE NOT NULL,
             address TEXT,
             entry_time TEXT
         )
     """)
-    conn.commit()
-with sqlite3.connect(DB_PATH) as conn:
-    c = conn.cursor()
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS customer_master(
-        customer_id INTEGER PRIMARY KEY,
-        customer_name TEXT NOT NULL,
-        mobile TEXT UNIQUE NOT NULL,
-        address TEXT,
-        entry_time TEXT
-    )
-    """)
-
     conn.commit()
 
 
