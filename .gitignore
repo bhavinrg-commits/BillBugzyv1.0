@@ -2,6 +2,10 @@ __pycache__/
 *.pyc
 build/
 dist/
+barcodes/
+Backups/
+ExpenseReports/
+Reports/
 *.spec
 
 Bills/*.pdf

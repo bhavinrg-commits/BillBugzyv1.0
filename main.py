@@ -1,15 +1,308 @@
 import os
 import sys
+from product_performance import open_product_performance
+from openpyxl import Workbook
+from tkinter import filedialog
+from backup_restore import *
 import barcode
+from settings import open_settings
 from barcode.writer import ImageWriter
 import os
 import win32print
 import win32ui
 from PIL import ImageWin
-
+import sqlite3
+from tkinter import ttk
 import win32print
+from auth import login_user
+import session
+from expenses import open_expenses
+from employee_operations import open_employee_operations
 
+BILL_PRINTER = "POSPrinter POS-80C"
+LABEL_PRINTER = "4BARCODE 4B-2054N"
 
+def open_print_labels():
+
+    win = Toplevel(window)
+    win.title("Print Barcode Labels")
+    win.state("zoomed")
+    win.configure(bg="white")
+
+    # =========================
+    # Search Area
+    # =========================
+
+    top_frame = Frame(win, bg="white")
+    top_frame.pack(fill=X, pady=10)
+
+    Label(
+        top_frame,
+        text="🔍 Search Product",
+        font=("Segoe UI", 14, "bold"),
+        bg="white"
+    ).pack(side=LEFT, padx=(20, 10))
+
+    search_var = StringVar()
+
+    search_entry = Entry(
+        top_frame,
+        textvariable=search_var,
+        font=("Segoe UI", 12),
+        width=40
+    )
+
+    search_entry.pack(side=LEFT)
+
+    Button(
+        top_frame,
+        text="Refresh",
+        font=("Segoe UI", 10, "bold"),
+        bg="#2196F3",
+        fg="white",
+        padx=15
+    ).pack(side=LEFT, padx=15)
+
+    # =========================
+    # Product List
+    # =========================
+
+    table_frame = Frame(win, bg="white")
+    table_frame.pack(fill=BOTH, expand=True, padx=15, pady=10)
+
+    columns = (
+        "ID",
+        "Barcode",
+        "Product",
+        "MRP",
+        "Price",
+        "Qty"
+    )
+
+    tree = ttk.Treeview(
+        table_frame,
+        columns=columns,
+        show="headings"
+    )
+
+    vsb = ttk.Scrollbar(
+        table_frame,
+        orient="vertical",
+        command=tree.yview
+    )
+
+    hsb = ttk.Scrollbar(
+        table_frame,
+        orient="horizontal",
+        command=tree.xview
+    )
+
+    tree.configure(
+        yscrollcommand=vsb.set,
+        xscrollcommand=hsb.set
+    )
+
+    tree.pack(
+        side=LEFT,
+        fill=BOTH,
+        expand=True
+    )
+
+    vsb.pack(
+        side=RIGHT,
+        fill=Y
+    )
+
+    hsb.pack(
+        side=BOTTOM,
+        fill=X
+    )
+
+    tree.heading("ID", text="ID")
+    tree.heading("Barcode", text="Barcode")
+    tree.heading("Product", text="Product Name")
+    tree.heading("MRP", text="MRP")
+    tree.heading("Price", text="Sell Price")
+    tree.heading("Qty", text="Stock")
+
+    tree.column("ID", width=80, anchor="center")
+    tree.column("Barcode", width=170, anchor="center")
+    tree.column("Product", width=350)
+    tree.column("MRP", width=120, anchor="center")
+    tree.column("Price", width=120, anchor="center")
+    tree.column("Qty", width=100, anchor="center")
+
+    # =========================
+    # Bottom Buttons
+    # =========================
+
+    bottom = Frame(win, bg="white")
+    bottom.pack(fill=X, pady=10)
+
+    Label(
+        bottom,
+        text="Copies",
+        bg="white",
+        font=("Segoe UI", 12, "bold")
+    ).pack(side=LEFT, padx=(20, 10))
+
+    copies_var = IntVar(value=1)
+
+    Spinbox(
+        bottom,
+        from_=1,
+        to=500,
+        width=6,
+        textvariable=copies_var,
+        font=("Segoe UI", 12)
+    ).pack(side=LEFT)
+
+    # =========================
+    # Functions
+    # =========================
+
+    def load_products1(keyword=""):
+
+        tree.delete(*tree.get_children())
+
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        c.execute("""
+            SELECT
+                productid,
+                barcode,
+                name,
+                mrp,
+                sell_price,
+                quantity
+            FROM product_master
+            WHERE
+                name LIKE ?
+                OR IFNULL(barcode,'') LIKE ?
+                OR CAST(productid AS TEXT) LIKE ?
+            ORDER BY name
+        """,
+                  (
+                      f"%{keyword}%",
+                      f"%{keyword}%",
+                      f"%{keyword}%"
+                  ))
+
+        rows = c.fetchall()
+
+        conn.close()
+
+        for row in rows:
+            tree.insert("", END, values=row)
+
+    def search_now(event=None):
+
+        load_products1(search_var.get().strip())
+
+    def print_selected_label(event=None):
+
+        selected = tree.selection()
+
+        if not selected:
+            return
+
+        values = tree.item(selected[0])["values"]
+
+        barcode = str(values[1])
+
+        print_tspl_label(
+            barcode,
+            values[2],
+            values[3],
+            values[4],
+            values[5]
+        )
+        tree.bind("<Double-1>", print_selected_label)
+
+    def print_selected(event=None):
+
+        selected = tree.selection()
+
+        if not selected:
+            messagebox.showerror(
+                "Print Label",
+                "Please select a product."
+            )
+            return
+
+        vals = tree.item(selected[0])["values"]
+
+        barcode = str(vals[1])
+        product = vals[2]
+        mrp = vals[3]
+        price = vals[4]
+        qty = vals[5]
+
+        if barcode in ("", None, "None"):
+            messagebox.showerror(
+                "Barcode Missing",
+                "This product has no barcode."
+            )
+            return
+
+        copies = copies_var.get()
+
+        for i in range(copies):
+            print_tspl_label(
+                barcode,
+                product,
+                mrp,
+                price,
+                qty
+            )
+
+    def print_double_click(event):
+
+        item = tree.identify_row(event.y)
+
+        if not item:
+            return
+
+        tree.selection_set(item)
+
+        print_selected()
+
+    # =========================
+    # Buttons
+    # =========================
+
+    Button(
+        bottom,
+        text="🖨 Print Selected",
+        font=("Segoe UI", 11, "bold"),
+        bg="#10B981",
+        fg="white",
+        padx=20,
+        command=print_selected
+    ).pack(side=RIGHT, padx=10)
+
+    Button(
+        bottom,
+        text="❌ Close",
+        font=("Segoe UI", 11, "bold"),
+        bg="#EF4444",
+        fg="white",
+        padx=20,
+        command=win.destroy
+    ).pack(side=RIGHT, padx=10)
+
+    # =========================
+    # Bindings
+    # =========================
+
+    search_entry.bind("<KeyRelease>", search_now)
+
+    tree.bind("<Double-Button-1>", print_double_click)
+
+    load_products1()
+
+    search_entry.focus_set()
 def print_tspl_label(barcode_no, product_name, mrp, sell_price, qty):
 
     printer_name = "4BARCODE 4B-2054N"
@@ -17,6 +310,28 @@ def print_tspl_label(barcode_no, product_name, mrp, sell_price, qty):
     hPrinter = win32print.OpenPrinter(printer_name)
 
     try:
+        LABEL_WIDTH_DOTS = 304  # 38mm at 203 dpi
+        MARGIN_X = 25           # left-crop safe zone (unchanged)
+        SAFE_WIDTH = LABEL_WIDTH_DOTS - (2 * MARGIN_X)  # usable printable width
+
+        # ---- Barcode sizing/centering ----
+        NARROW = 3
+        BAR_HEIGHT = 80
+
+        modules = (len(barcode_no) + 2) * 11 + 13
+        barcode_width = modules * NARROW
+
+        # If barcode is wider than safe area, shrink NARROW down to fit
+        if barcode_width > SAFE_WIDTH:
+            NARROW = max(2, SAFE_WIDTH // modules)
+            barcode_width = modules * NARROW
+
+        barcode_x = MARGIN_X + max(0, (SAFE_WIDTH - barcode_width) // 2)
+
+        # ---- Barcode number text centering (font "3") ----
+        CHAR_WIDTH_EST = 22
+        text_width = len(barcode_no) * CHAR_WIDTH_EST
+        text_x = MARGIN_X + max(0, (SAFE_WIDTH - text_width) // 2)
 
         tspl = f"""
 SIZE 38 mm,38 mm
@@ -28,21 +343,17 @@ REFERENCE 0,0
 OFFSET 0 mm
 CLS
 
-BARCODE 15,20,"128",70,1,0,2,2,"{barcode_no}"
+BARCODE {barcode_x},20,"128",{BAR_HEIGHT},0,0,{NARROW},{NARROW},"{barcode_no}"
 
-TEXT 60,100,"3",0,1,1,"{barcode_no}"
+TEXT {text_x},110,"3",0,1,1,"{barcode_no}"
 
-BAR 10,125,280,2
+BAR {10+MARGIN_X},140,{280-MARGIN_X},2
 
-TEXT 10,140,"3",0,1,1,"BUGZY"
+TEXT {10+MARGIN_X},155,"3",0,1,1,"BUGZY"
 
-TEXT 10,170,"2",0,1,1,"{product_name[:20]}"
+TEXT {10+MARGIN_X},185,"2",0,1,1,"{product_name[:20]}"
 
-TEXT 10,200,"2",0,1,1,"MRP : {mrp}"
-
-TEXT 10,225,"2",0,1,1,"Price : {sell_price}"
-
-TEXT 10,250,"2",0,1,1,"Qty : {qty}"
+TEXT {10+MARGIN_X},240,"2",0,1,1,"Price : {sell_price}"
 
 PRINT 1
 """
@@ -65,8 +376,6 @@ PRINT 1
 
     finally:
         win32print.ClosePrinter(hPrinter)
-
-
 if getattr(sys, "frozen", False):
     BASE_DIR = os.path.dirname(sys.executable)
 else:
@@ -471,6 +780,13 @@ def show_all_customers(parent):
         load_customers()
 
     def update_customer():
+        if session.CURRENT_ROLE.upper() != "ADMIN":
+            messagebox.showerror(
+                "Access Denied",
+                "Only Admin can update customer details."
+            )
+            return
+
         selected = tree.selection()
         if not selected:
             messagebox.showerror("Error", "No customer selected")
@@ -534,6 +850,12 @@ def show_all_customers(parent):
         ).pack(pady=20)
 
     def delete_customer():
+        if session.CURRENT_ROLE.upper() != "ADMIN":
+            messagebox.showerror(
+                "Access Denied",
+                "Only Admin can delete customer details."
+            )
+            return
         selected = tree.selection()
         if not selected:
             messagebox.showerror("Error", "No customer selected")
@@ -560,29 +882,30 @@ def show_all_customers(parent):
 
     bottom_frame = Frame(win, bg="#FFF8E7")
     bottom_frame.pack(fill="x", pady=12)
-    update_btn = Button(
-        bottom_frame,
-        text="✏ Update",
-        bg="#3B82F6",
-        fg="white",
-        font=("Segoe UI", 11, "bold"),
-        width=14,
-        command=update_customer
-    )
+    if session.CURRENT_ROLE.upper() == "ADMIN":
+        update_btn = Button(
+            bottom_frame,
+            text="✏ Update",
+            bg="#3B82F6",
+            fg="white",
+            font=("Segoe UI", 11, "bold"),
+            width=14,
+            command=update_customer
+        )
 
-    update_btn.pack(side="left", padx=10)
+        update_btn.pack(side="left", padx=10)
+    if session.CURRENT_ROLE.upper() == "ADMIN":
+        delete_btn = Button(
+            bottom_frame,
+            text="🗑 Delete",
+            bg="#EF4444",
+            fg="white",
+            font=("Segoe UI", 11, "bold"),
+            width=14,
+            command=delete_customer
+        )
 
-    delete_btn = Button(
-        bottom_frame,
-        text="🗑 Delete",
-        bg="#EF4444",
-        fg="white",
-        font=("Segoe UI", 11, "bold"),
-        width=14,
-        command=delete_customer
-    )
-
-    delete_btn.pack(side="left", padx=10)
+        delete_btn.pack(side="left", padx=10)
     load_customers()
 
     Button(
@@ -1057,6 +1380,12 @@ def show_all_products(parent_win):
     load_products()
     # Delete selected row
     def delete_selected():
+        if session.CURRENT_ROLE.upper() != "ADMIN":
+            messagebox.showerror(
+                "Access Denied",
+                "Only Admin can delete products."
+            )
+            return
         selected = tree.selection()
         if not selected:
             messagebox.showerror("Error", "No product selected")
@@ -1112,20 +1441,62 @@ def show_all_products(parent_win):
     btn_bar = Frame(show_win, bg="#FFF8E7")
     btn_bar.pack(pady=10)
 
-    Button(btn_bar, text="🗑  Delete Selected", bg="#EF4444", fg="white",
-           font=("Segoe UI", 12, "bold"), relief="flat", bd=0, cursor="hand2", width=18,
-           command=lambda: ask_password(delete_selected)).grid(row=0, column=0, padx=15)
+    # Show Update/Delete buttons only for Admin
+    if session.CURRENT_ROLE.upper() == "ADMIN":
 
-    Button(btn_bar, text="✏️ Update Selected", bg="#F59E0B", fg="white",
-           font=("Segoe UI", 12, "bold"), relief="flat", bd=0, cursor="hand2", width=18,
-           command=lambda: ask_password(update_selected)).grid(row=0, column=1, padx=15)
+        Button(
+            btn_bar,
+            text="🗑 Delete Selected",
+            bg="#EF4444",
+            fg="white",
+            font=("Segoe UI", 12, "bold"),
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            width=18,
+            command=lambda: ask_password(delete_selected)
+        ).grid(row=0, column=0, padx=15)
 
-    Button(btn_bar, text="← Back", bg="#6B7280", fg="white",
-           font=("Segoe UI", 12, "bold"), relief="flat", bd=0, cursor="hand2", width=18,
-           command=show_win.destroy).grid(row=0, column=2, padx=15)
+        Button(
+            btn_bar,
+            text="✏️ Update Selected",
+            bg="#F59E0B",
+            fg="white",
+            font=("Segoe UI", 12, "bold"),
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            width=18,
+            command=lambda: ask_password(update_selected)
+        ).grid(row=0, column=1, padx=15)
+
+        back_col = 2
+
+    else:
+        back_col = 0
+
+    # Back button for everyone
+    Button(
+        btn_bar,
+        text="← Back",
+        bg="#6B7280",
+        fg="white",
+        font=("Segoe UI", 12, "bold"),
+        relief="flat",
+        bd=0,
+        cursor="hand2",
+        width=18,
+        command=show_win.destroy
+    ).grid(row=0, column=back_col, padx=15)
 
     # Update selected row
     def update_selected():
+        if session.CURRENT_ROLE.upper() != "ADMIN":
+            messagebox.showerror(
+                "Access Denied",
+                "Only Admin can update products."
+            )
+            return
         selected = tree.selection()
         if not selected:
             messagebox.showerror("Error", "No product selected")
@@ -1230,19 +1601,37 @@ def open_bills():
 
     top_banner = Frame(bills_win, bg="#3B82F6")
     top_banner.pack(fill="x")
-    Label(top_banner, text="📄  Bill Records", font=("Segoe UI", 20, "bold"),
+    Label(top_banner, text="📄  Bill Records", font=("Segoe UI", 13, "bold"),
           bg="#3B82F6", fg="white").pack(pady=18)
 
     # --- Filter Frame ---
     filter_frame = Frame(bills_win, bg="#FFF8E7")
     filter_frame.pack(fill="x", padx=10, pady=5)
+    # ---------------- Bill Search ----------------
 
+    Label(
+        filter_frame,
+        text="Bill No:",
+        font=("arial", 10, "bold"),
+        bg="#D1F2EB"
+    ).grid(row=0, column=7, padx=(20, 5), pady=5)
+
+    bill_search_var = StringVar()
+
+    bill_search_entry = Entry(
+        filter_frame,
+        textvariable=bill_search_var,
+        font=("arial", 10),
+        width=18
+    )
+
+    bill_search_entry.grid(row=0, column=8, padx=5)
     Label(filter_frame, text="From Date (DD-MM-YYYY):", font=("arial", 10, "bold"), bg="#D1F2EB").grid(row=0, column=0, padx=5, pady=5)
-    from_var = StringVar(value=datetime.datetime.now().strftime("%d-%m-%Y"))
+    from_var = StringVar(value="")
     Entry(filter_frame, textvariable=from_var, font=("arial", 10), width=12).grid(row=0, column=1, padx=5)
 
     Label(filter_frame, text="To Date (DD-MM-YYYY):", font=("arial", 10, "bold"), bg="#D1F2EB").grid(row=0, column=2, padx=5, pady=5)
-    to_var = StringVar(value=datetime.datetime.now().strftime("%d-%m-%Y"))
+    to_var = StringVar(value="")
     Entry(filter_frame, textvariable=to_var, font=("arial", 10), width=12).grid(row=0, column=3, padx=5)
     Button(filter_frame, text="🔍 Search", font=("Segoe UI", 10, "bold"),
            bg="#6366F1", fg="white", relief="flat", cursor="hand2",
@@ -1254,6 +1643,21 @@ def open_bills():
                to_var.set(datetime.datetime.now().strftime("%d-%m-%Y")),
                load_bills()
            )).grid(row=0, column=5, padx=5)
+    Button(
+        filter_frame,
+        text="♻ Reset",
+        font=("Segoe UI", 10, "bold"),
+        bg="#6B7280",
+        fg="white",
+        relief="flat",
+        cursor="hand2",
+        command=lambda: (
+            from_var.set(""),
+            to_var.set(""),
+            bill_search_var.set(""),
+            load_bills()
+        )
+    ).grid(row=0, column=9, padx=5)
     Button(filter_frame, text="📊 Day Wise", font=("Segoe UI", 10, "bold"),
            bg="#F59E0B", fg="white", relief="flat", cursor="hand2",
            command=day_wise_sale).grid(row=0, column=6, padx=5)
@@ -1305,25 +1709,95 @@ def open_bills():
 
     def load_bills():
         bill_tree.delete(*bill_tree.get_children())
-        try:
-            from_date = datetime.datetime.strptime(from_var.get(), "%d-%m-%Y").strftime("%d-%m-%Y")
-            to_date   = datetime.datetime.strptime(to_var.get(),   "%d-%m-%Y").strftime("%d-%m-%Y")
-            if from_date == to_date:
-                selected_date_var.set(f"📅 Business Summary - {from_date}")
-            else:
-                selected_date_var.set(f"📅 Business Summary ({from_date}  to  {to_date})")
-        except ValueError:
-            messagebox.showerror("Error", "Invalid date format. Use DD-MM-YYYY")
-            return
+
+
+        if from_var.get().strip() == "" and to_var.get().strip() == "":
+
+            from_date = None
+            to_date = None
+
+            selected_date_var.set("📅 Business Summary - All Bills")
+
+        else:
+
+            try:
+
+                from_date = datetime.datetime.strptime(
+                    from_var.get(),
+                    "%d-%m-%Y"
+                ).strftime("%d-%m-%Y")
+
+                to_date = datetime.datetime.strptime(
+                    to_var.get(),
+                    "%d-%m-%Y"
+                ).strftime("%d-%m-%Y")
+
+                if from_date == to_date:
+
+                    selected_date_var.set(
+                        f"📅 Business Summary - {from_date}"
+                    )
+
+                else:
+
+                    selected_date_var.set(
+                        f"📅 Business Summary ({from_date} to {to_date})"
+                    )
+
+            except ValueError:
+
+                messagebox.showerror(
+                    "Error",
+                    "Invalid date format.\nUse DD-MM-YYYY"
+                )
+
+                return
 
         with sqlite3.connect(DB_PATH) as conn:
             c = conn.cursor()
-            c.execute("""
-                SELECT bill_no, customer_name, contact, total, bill_date, bill_time,payment_mode
-                FROM bill_master
-                WHERE bill_date BETWEEN ? AND ?
-                ORDER BY bill_id DESC
-            """, (from_date, to_date))
+            keyword = bill_search_var.get().strip()
+
+            keyword = bill_search_var.get().strip()
+
+            if from_date is None:
+
+                c.execute("""
+                    SELECT
+                        bill_no,
+                        customer_name,
+                        contact,
+                        total,
+                        bill_date,
+                        bill_time,
+                        payment_mode
+                    FROM bill_master
+                    WHERE bill_no LIKE ?
+                    ORDER BY bill_id DESC
+                """, (
+                    f"%{keyword}%",
+                ))
+
+            else:
+
+                c.execute("""
+                    SELECT
+                        bill_no,
+                        customer_name,
+                        contact,
+                        total,
+                        bill_date,
+                        bill_time,
+                        payment_mode
+                    FROM bill_master
+                    WHERE
+                        bill_date BETWEEN ? AND ?
+                        AND bill_no LIKE ?
+                    ORDER BY bill_id DESC
+                """, (
+                    from_date,
+                    to_date,
+                    f"%{keyword}%"
+                ))
             rows = c.fetchall()
 
         total_collection = 0.0
@@ -1406,19 +1880,399 @@ def open_bills():
         else:
             messagebox.showerror("Not Found", f"PDF not found:\n{pdf_path}")
 
+
+
+
+    def download_bill():
+
+        import os
+        import sys
+
+        selected = bill_tree.selection()
+
+        if not selected:
+            messagebox.showerror(
+                "Error",
+                "Select a bill first."
+            )
+            return
+
+        bill_no = bill_tree.item(selected[0])["values"][0]
+
+        if getattr(sys, 'frozen', False):
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+
+        source_pdf = os.path.join(
+            base_dir,
+            "Bills",
+            f"{bill_no}.pdf"
+        )
+
+        if not os.path.exists(source_pdf):
+            messagebox.showerror(
+                "Error",
+                "PDF not found."
+            )
+            return
+
+        destination = filedialog.asksaveasfilename(
+
+            defaultextension=".pdf",
+
+            initialfile=f"{bill_no}.pdf",
+
+            filetypes=[
+                ("PDF Files", "*.pdf")
+            ]
+
+        )
+
+        if destination:
+            shutil.copy2(
+                source_pdf,
+                destination
+            )
+
+            messagebox.showinfo(
+                "Success",
+                "PDF downloaded successfully."
+            )
+
+    def export_excel():
+
+        if not bill_tree.get_children():
+            messagebox.showerror(
+                "Error",
+                "No bills to export."
+            )
+
+            return
+
+        file = filedialog.asksaveasfilename(
+
+            defaultextension=".xlsx",
+
+            filetypes=[("Excel File", "*.xlsx")],
+
+            initialfile="Bill_Report.xlsx"
+
+        )
+
+        if not file:
+            return
+
+        wb = Workbook()
+
+        ws = wb.active
+
+        ws.title = "Bills"
+
+        # Headings
+
+        ws.append([
+            "Bill No",
+            "Customer",
+            "Contact",
+            "Total",
+            "Date",
+            "Time",
+            "Payment"
+        ])
+
+        # Rows
+
+        for item in bill_tree.get_children():
+            ws.append(
+                bill_tree.item(item)["values"]
+            )
+
+        # Auto column width
+
+        for column_cells in ws.columns:
+            length = max(
+
+                len(str(cell.value))
+
+                if cell.value else 0
+
+                for cell in column_cells
+
+            )
+
+            ws.column_dimensions[
+                column_cells[0].column_letter
+            ].width = length + 5
+
+        wb.save(file)
+
+        messagebox.showinfo(
+
+            "Success",
+
+            "Excel exported successfully."
+
+        )
+
+    def export_detailed_excel():
+
+        file = filedialog.asksaveasfilename(
+
+            defaultextension=".xlsx",
+
+            filetypes=[("Excel File", "*.xlsx")],
+
+            initialfile="Detailed_Bill_Report.xlsx"
+
+        )
+
+        if not file:
+            return
+
+        wb = Workbook()
+
+        ws = wb.active
+
+        ws.title = "Detailed Bills"
+
+        ws.append([
+
+            "Bill No",
+
+            "Bill Date",
+
+            "Bill Time",
+
+            "Customer",
+
+            "Mobile",
+
+            "Payment",
+
+            "Product",
+
+            "Qty",
+
+            "Sell Price",
+
+            "Total",
+
+            "Wholesale",
+
+            "Profit"
+
+        ])
+
+        conn = sqlite3.connect(DB_PATH)
+
+        c = conn.cursor()
+
+        c.execute("""
+
+            SELECT
+
+                bm.bill_no,
+
+                bm.bill_date,
+
+                bm.bill_time,
+
+                bm.customer_name,
+
+                bm.contact,
+
+                bm.payment_mode,
+
+                bi.product_name,
+
+                bi.qty,
+
+                bi.sell_price,
+
+                bi.total,
+
+                bi.wholesale_price,
+
+                bi.profit
+
+            FROM bill_master bm
+
+            JOIN bill_items bi
+
+            ON bm.bill_id = bi.bill_id
+
+            ORDER BY bm.bill_id DESC
+
+        """)
+
+        rows = c.fetchall()
+
+        conn.close()
+
+        for row in rows:
+            ws.append(row)
+
+        # Auto Width
+
+        for column in ws.columns:
+
+            max_length = 0
+
+            column_letter = column[0].column_letter
+
+            for cell in column:
+
+                try:
+
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+
+                except:
+
+                    pass
+
+            ws.column_dimensions[column_letter].width = max_length + 4
+
+        wb.save(file)
+
+        messagebox.showinfo(
+
+            "Success",
+
+            "Detailed Excel exported successfully."
+
+        )
+
+    def delete_bill():
+
+        selected = bill_tree.selection()
+
+        if not selected:
+            messagebox.showerror("Error", "Please select a bill.")
+            return
+
+        bill_no = bill_tree.item(selected[0])["values"][0]
+
+        if not messagebox.askyesno(
+                "Delete Bill",
+                f"Delete Bill {bill_no} ?"):
+            return
+
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # Restore Stock
+        c.execute("""
+            SELECT product_id, qty
+            FROM bill_items
+            WHERE bill_id=(
+                SELECT bill_id
+                FROM bill_master
+                WHERE bill_no=?
+            )
+        """, (bill_no,))
+
+        rows = c.fetchall()
+
+        for product_id, qty in rows:
+            c.execute("""
+                UPDATE product_master
+                SET quantity = quantity + ?
+                WHERE productid=?
+            """, (qty, product_id))
+
+        # Delete Items
+        c.execute("""
+            DELETE FROM bill_items
+            WHERE bill_id=(
+                SELECT bill_id
+                FROM bill_master
+                WHERE bill_no=?
+            )
+        """, (bill_no,))
+
+        # Delete Master
+        c.execute("""
+            DELETE FROM bill_master
+            WHERE bill_no=?
+        """, (bill_no,))
+
+        conn.commit()
+        conn.close()
+
+        messagebox.showinfo(
+            "Success",
+            "Bill Deleted Successfully"
+        )
+
+        load_bills()
+
     bill_tree.bind("<<TreeviewSelect>>", on_bill_select)
 
     bottom_btn = Frame(bills_win, bg="#FFF8E7")
     bottom_btn.pack(pady=8)
 
-    Button(bottom_btn, text="🖨  Reprint Selected Bill", font=("Segoe UI", 11, "bold"),
+    Button(bottom_btn, text="🖨  Reprint Bill", font=("Segoe UI", 11, "bold"),
            bg="#3B82F6", fg="white", relief="flat", cursor="hand2", width=22,
            command=reprint_bill).grid(row=0, column=0, padx=15)
-
+    Button(
+        bottom_btn,
+        text="📥 Download PDF",
+        font=("Segoe UI", 11, "bold"),
+        bg="#10B981",
+        fg="white",
+        relief="flat",
+        cursor="hand2",
+        width=18,
+        command=download_bill
+    ).grid(row=0, column=1, padx=10)
     Button(bottom_btn, text="← Back", font=("Segoe UI", 11, "bold"),
            bg="#EF4444", fg="white", relief="flat", cursor="hand2", width=15,
-           command=bills_win.destroy).grid(row=0, column=1, padx=15)
+           command=bills_win.destroy).grid(row=0, column=4, padx=15)
+    Button(
+        bottom_btn,
+        text="📊 Export Summary",
+        font=("Segoe UI", 11, "bold"),
+        bg="#16A34A",
+        fg="white",
+        relief="flat",
+        cursor="hand2",
+        width=18,
+        command=export_excel
+    ).grid(row=0, column=2, padx=10)
+    Button(
+        bottom_btn,
+        text="📦 Export Detailed",
+        font=("Segoe UI", 11, "bold"),
+        bg="#2563EB",
+        fg="white",
+        relief="flat",
+        cursor="hand2",
+        width=18,
+        command=export_detailed_excel
+    ).grid(row=0, column=3, padx=10)
 
+    if session.CURRENT_ROLE.upper() == "ADMIN":
+        Button(
+            bottom_btn,
+            text="🗑 Delete Bill",
+            font=("Segoe UI", 11, "bold"),
+            bg="#DC2626",
+            fg="white",
+            relief="flat",
+            cursor="hand2",
+            width=18,
+            command=delete_bill
+        ).grid(row=0, column=4, padx=10)
+
+    def live_bill_search(event=None):
+        load_bills()
+
+    bill_search_entry.bind(
+        "<KeyRelease>",
+        live_bill_search
+    )
     load_bills()  # load today's bills on open
 def create_card(parent, title, variable, bg):
 
@@ -2874,6 +3728,7 @@ def open_reports():
         bg="#8B5CF6",
         fg="white",
         font=("Segoe UI", 18, "bold"),
+        command=lambda: open_product_performance(report_win),
         relief="flat",
         cursor="hand2"
     ).grid(row=1, column=0, padx=25, pady=25)
@@ -3398,6 +4253,7 @@ def open_newbill(search_frame=None, scan_barcode=None):
     for col in ("ID", "Name", "Sell", "Qty", "MRP", "Category"):
         product_tree.heading(col, text=col)
         product_tree.column(col, width=100)
+        product_tree.bind("<Double-1>", lambda e: add_to_cart())
     product_tree.pack(fill="both", expand=True, padx=5, pady=5)
     enable_cell_copy(product_tree)
 
@@ -3895,6 +4751,8 @@ def open_newbill(search_frame=None, scan_barcode=None):
 
         frame = Frame(qty_win)
         frame.pack(pady=15)
+        qty_win.focus_set()
+        qty_win.bind("<Return>", lambda e: confirm_add())
 
         def minus_qty():
             if qty_var.get() > 1:
@@ -4185,88 +5043,524 @@ window.geometry("600x600")
 window.title("Billing App")
 window.state("zoomed")
 window.configure(bg="#6BADA0")
+window.withdraw()
 
-# ---------------- MAIN WINDOW THEME ----------------
-top_frame = Frame(window, bg="#4ECDC4")   # Aqua Teal
-top_frame.place(relx=0, rely=0, relwidth=1, relheight=0.42)
+def open_database_explorer():
 
-bottom_frame = Frame(window, bg="#FFF8E7")  # Soft Ivory
-bottom_frame.place(relx=0, rely=0.42, relwidth=1, relheight=0.58)
+    db_window = Toplevel()
+    db_window.title("Database Explorer")
+    db_window.geometry("1200x700")
+    db_window.configure(bg="white")
 
-# Header
-homepageLbl = Label(
+    # ---------------- LEFT PANEL ----------------
+
+    left_frame = Frame(db_window, bg="#F5F5F5", width=260)
+    left_frame.pack(side=LEFT, fill=Y)
+
+    Label(
+        left_frame,
+        text="Database Tables",
+        font=("Segoe UI", 14, "bold"),
+        bg="#F5F5F5"
+    ).pack(pady=10)
+
+    table_list = Listbox(
+        left_frame,
+        font=("Segoe UI", 11),
+        width=30
+    )
+
+    table_list.pack(fill=BOTH, expand=True, padx=10, pady=10)
+
+    # ---------------- RIGHT PANEL ----------------
+
+    right_frame = Frame(db_window, bg="white")
+    right_frame.pack(side=RIGHT, fill=BOTH, expand=True)
+
+    table_title = Label(
+        right_frame,
+        text="Select any table",
+        font=("Segoe UI", 15, "bold"),
+        bg="white"
+    )
+
+    table_title.pack(pady=10)
+
+    tree = ttk.Treeview(right_frame)
+
+    vsb = ttk.Scrollbar(right_frame, orient="vertical", command=tree.yview)
+    hsb = ttk.Scrollbar(right_frame, orient="horizontal", command=tree.xview)
+
+    tree.configure(
+        yscrollcommand=vsb.set,
+        xscrollcommand=hsb.set
+    )
+
+    tree.pack(fill=BOTH, expand=True)
+
+    vsb.pack(side=RIGHT, fill=Y)
+    hsb.pack(fill=X)
+
+    # ---------------- DATABASE ----------------
+
+    conn = sqlite3.connect("store.db")      # CHANGE if your DB name differs
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+    )
+
+    tables = cursor.fetchall()
+
+    for t in tables:
+        table_list.insert(END, t[0])
+
+    # ---------------- SHOW TABLE ----------------
+
+    def load_table(event):
+
+        selected = table_list.get(table_list.curselection())
+
+        table_title.config(text=selected)
+
+        tree.delete(*tree.get_children())
+
+        tree["columns"] = ()
+
+        cursor.execute(f"SELECT * FROM {selected}")
+
+        rows = cursor.fetchall()
+
+        columns = [x[0] for x in cursor.description]
+
+        tree["columns"] = columns
+        tree["show"] = "headings"
+
+        for col in columns:
+            tree.heading(col, text=col)
+            tree.column(col, width=140, anchor="center")
+
+        for row in rows:
+            tree.insert("", END, values=row)
+
+    table_list.bind("<<ListboxSelect>>", load_table)
+
+
+
+from tkinter import Toplevel, Label, Entry, Button, StringVar, messagebox
+
+def logout():
+
+    answer = messagebox.askyesno(
+        "Logout",
+        "Are you sure you want to logout?"
+    )
+
+    if not answer:
+        return
+
+    # Clear session
+    session.CURRENT_USER = None
+    session.CURRENT_NAME = None
+    session.CURRENT_ROLE = None
+
+    # Hide main window
+    window.withdraw()
+
+    # Show login again
+    show_login()
+
+def close_application():
+
+    if messagebox.askyesno(
+        "Exit",
+        "Are you sure you want to Exit BUGZY Billing?"
+    ):
+        window.destroy()
+window.protocol("WM_DELETE_WINDOW", close_application)
+def show_login():
+
+    login = Toplevel()
+    login.title("BUGZY Login")
+    login.geometry("420x320")
+    login.resizable(False, False)
+    login.configure(bg="#EEF2F7")
+    login.grab_set()
+
+    Label(
+        login,
+        text="BUGZY BILLING SYSTEM",
+        font=("Segoe UI",17,"bold"),
+        bg="#EEF2F7",
+        fg="#1E293B"
+    ).pack(pady=20)
+
+    Label(login, text="Username", bg="#EEF2F7").pack()
+
+    username = StringVar()
+
+    Entry(
+        login,
+        textvariable=username,
+        font=("Segoe UI",12),
+        width=25
+    ).pack(pady=5)
+
+    Label(login, text="Password", bg="#EEF2F7").pack()
+
+    password = StringVar()
+
+    pwd = Entry(
+        login,
+        textvariable=password,
+        show="*",
+        font=("Segoe UI",12),
+        width=25
+    )
+
+    pwd.pack(pady=5)
+
+    def do_login():
+
+        result = login_user(
+            username.get().strip(),
+            password.get().strip()
+        )
+        print(result)
+
+        if not result["success"]:
+            messagebox.showerror(
+                "Login",
+                "Invalid Username or Password"
+            )
+            return
+
+        session.CURRENT_USER = username.get().strip()
+        session.CURRENT_NAME = result["name"]
+        session.CURRENT_ROLE = result["role"]
+
+        login.destroy()
+
+        apply_role_permissions()
+
+        window.deiconify()
+
+    Button(
+        login,
+        text="Login",
+        bg="#10B981",
+        fg="white",
+        font=("Segoe UI",12,"bold"),
+        width=18,
+        command=do_login
+    ).pack(pady=20)
+
+    pwd.bind("<Return>", lambda e: do_login())
+
+    def apply_role_permissions():
+
+        role = session.CURRENT_ROLE.upper()
+        logged_user_lbl.config(
+            text=f"👤 {session.CURRENT_NAME} ({role})"
+        )
+
+        # First show everything
+        cards.grid_slaves(row=0, column=1)[0].grid()
+        cards.grid_slaves(row=1, column=1)[0].grid()
+        cards.grid_slaves(row=2, column=1)[0].grid()
+
+        db_btn.place(
+            relx=0.98,
+            rely=0.97,
+            anchor="se"
+        )
+
+        # Employee Restrictions
+        if role == "EMPLOYEE":
+            # cards.grid_slaves(row=0, column=1)[0].grid_remove()
+            cards.grid_slaves(row=1, column=1)[0].grid_remove()
+            cards.grid_slaves(row=2, column=1)[0].grid_remove()
+
+        db_btn.place_forget()
+        logout_btn.place(
+            relx=0.99,
+            rely=0.01,
+            anchor="ne"
+        )
+def create_dashboard_card(parent,
+                          icon,
+                          text,
+                          bg,
+                          command,
+                          width=240,
+                          height=90):
+
+    card = Frame(
+        parent,
+        bg=bg,
+        width=width,
+        height=height,
+        cursor="hand2",
+        bd=0,
+        highlightthickness=0
+    )
+
+    card.pack_propagate(False)
+
+    icon_lbl = Label(
+        card,
+        text=icon,
+        font=("Segoe UI Emoji",22),
+        bg=bg,
+        fg="#1F2937"
+    )
+
+    icon_lbl.pack(pady=(18,4))
+
+    text_lbl = Label(
+        card,
+        text=text,
+        font=("Segoe UI",13,"bold"),
+        bg=bg,
+        fg="#1F2937"
+    )
+
+    text_lbl.pack()
+
+    def hover(e):
+        card.configure(highlightbackground="#2563EB",
+                       highlightthickness=3)
+
+    def leave(e):
+        card.configure(highlightthickness=0)
+
+    widgets=[card,icon_lbl,text_lbl]
+
+    for w in widgets:
+
+        w.bind("<Enter>",hover)
+
+        w.bind("<Leave>",leave)
+
+        w.bind("<Button-1>",lambda e:command())
+
+    return card
+
+
+# ===================== MAIN BACKGROUND =====================
+
+window.configure(bg="#EEF2F7")
+
+# ===================== HEADER =====================
+
+header = Frame(
     window,
-    text="BUGZY BILLING SYSTEM",
-    fg="#FACC15",
     bg="#1E293B",
-    relief="flat",
-    padx=20,
-    pady=10,
-    font=("Segoe UI", 26, "bold")
+    height=85
 )
-homepageLbl.pack(pady=30)
+
+header.pack(fill="x")
+
+homepageLbl = Label(
+    header,
+    text="BUGZY BILLING SYSTEM",
+    bg="#1E293B",
+    fg="#FACC15",
+    font=("Segoe UI",26,"bold")
+)
+
+homepageLbl.pack(pady=18)
+
+# ===================== BODY =====================
+
+body = Frame(
+    window,
+    bg="#EEF2F7"
+)
+
+body.pack(fill="both", expand=True)
+
+# White Dashboard Card
+
+dashboard = Frame(
+    body,
+    bg="white",
+    bd=0
+)
+# dashboard.pack(padx=15, pady=15)
+dashboard.place(
+    relx=0.5,
+    rely=0.54,
+    anchor="center",
+    width=820,
+    height=520
+)
+
+# ===================== FOOTER =====================
+
+footer = Frame(
+    window,
+    bg="#E5E7EB",
+    height=35
+)
+
+footer.pack(fill="x")
+
+footer_lbl = Label(
+    footer,
+    text="BUGZY Billing System  |  Version 2.2",
+    bg="#E5E7EB",
+    fg="#374151",
+    font=("Segoe UI",10)
+)
+
+footer_lbl.pack(side="left", padx=15)
+
+db_btn = Button(
+    window,
+    text="🗄 Admin / DB Explorer",
+    font=("Segoe UI", 10, "bold"),
+    bg="#263238",
+    fg="white",
+    relief="flat",
+    cursor="hand2",
+    padx=15,
+    pady=8,
+    command=open_database_explorer
+)
+
+db_btn.place(relx=0.98, rely=0.97, anchor="se")
+
+
 
 # Main Button Frame
-menu_frame = Frame(window, bg="#FFFFFF")
-menu_frame.pack(expand=True)
+# menu_frame = Frame(
+#     dashboard,
+#     bg="white"
+# )
+# menu_frame.place(
+#     relx=0.5,
+#     rely=0.53,
+#     anchor="center"
+# )
+#
+# menu_frame.configure(width=820, height=620)
+# menu_frame.pack_propagate(False)
+# menu_frame.grid_propagate(False)
 
 # Button Common Style
-btn_font = ("Segoe UI",30, "bold")
-btn_width = 12
+btn_font = ("Segoe UI",18, "bold")
+btn_width = 9
 btn_height = 2
 
 # Row 1
-Button(
-    menu_frame,
-    text="🧾 New Bill",
-    font=btn_font,
-    width=btn_width,
-    height=btn_height,
-    bg="#10B981",     # Royal Blue
-    fg="#1F2937",
+cards = Frame(
+    dashboard,
+    bg="white"
+)
+
+cards.pack(expand=True)
+newbill_card = create_dashboard_card(
+    cards,
+    "🧾",
+    "New Bill",
+    "#22C55E",
+    open_newbill
+)
+newbill_card.grid(row=0,column=0,padx=15,pady=15)
+
+products_card = create_dashboard_card(
+    cards,
+    "📦",
+    "Products",
+    "#7C73FF",
+    open_products
+)
+products_card.grid(row=0,column=1,padx=15,pady=15)
+
+customers_card = create_dashboard_card(
+    cards,
+    "👥",
+    "Customers",
+    "#F59E0B",
+    open_customers
+)
+customers_card.grid(row=1,column=0,padx=15,pady=15)
+
+reports_card = create_dashboard_card(
+    cards,
+    "📊",
+    "Reports",
+    "#4F8EF7",
+    open_reports
+)
+reports_card.grid(row=1,column=1,padx=15,pady=15)
+
+barcode_card = create_dashboard_card(
+    cards,
+    "🏷",
+    "Barcode",
+    "#EC4899",
+    open_print_labels,
+    width=240,
+    height=90
+)
+barcode_card.grid(row=2,column=0,padx=18,pady=12)
+
+settings_card = create_dashboard_card(
+    cards,
+    "⚙",
+    "Settings",
+    "#6B7280",
+    lambda: open_settings(window),
+    width=240,
+    height=90
+)
+settings_card.grid(row=2,column=1,padx=18,pady=12)
+
+employee_card = create_dashboard_card(
+    cards,
+    "👨‍💼",
+    "Employee Operations",
+    "#1E40AF",
+    lambda: open_employee_operations(window),
+    width=520,
+    height=90
+)
+employee_card.grid(row=3,column=0,columnspan=2,pady=16)
+
+
+show_login()
+
+logged_user_lbl = Label(
+    window,
+    text="",
+    font=("Segoe UI",11,"bold"),
+    bg="#1E293B",
+    fg="white"
+)
+
+logged_user_lbl.place(
+    relx=0.01,
+    rely=0.01
+)
+
+logout_btn = Button(
+    window,
+    text="🚪 Logout",
+    font=("Segoe UI",10,"bold"),
+    bg="#DC2626",
+    fg="white",
     bd=0,
     cursor="hand2",
-    command=open_newbill
-).grid(row=0, column=0, padx=20, pady=20)
+    padx=12,
+    pady=5,
+    command=logout
+)
 
-Button(
-    menu_frame,
-    text="📦 Products",
-    font=btn_font,
-    width=btn_width,
-    height=btn_height,
-    bg="#6366F1",     # Modern Purple
-    fg="#1F2937",
-    bd=0,
-    cursor="hand2",
-    command=open_products
-).grid(row=0, column=1, padx=20, pady=20)
-
-# Row 2
-Button(
-    menu_frame,
-    text="👥 Customers",
-    font=btn_font,
-    width=btn_width,
-    height=btn_height,
-    bg="#F59E0B",     # Orange
-    fg="#1F2937",
-    bd=0,
-    cursor="hand2",
-    command=open_customers
-).grid(row=1, column=0, padx=20, pady=20)
-
-Button(
-    menu_frame,
-    text="📊 Reports",
-    font=btn_font,
-    width=btn_width,
-    height=btn_height,
-    bg="#3B82F6",     # Emerald Green
-    fg="#1F2937",
-    bd=0,
-    cursor="hand2",
-    command=open_reports
-).grid(row=1, column=1, padx=20, pady=20)
-
+logout_btn.place(
+    relx=0.99,
+    rely=0.01,
+    anchor="ne"
+)
 window.mainloop()
